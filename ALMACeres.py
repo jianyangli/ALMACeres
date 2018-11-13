@@ -1,7 +1,142 @@
 from jylipy import *
 import numpy as np
-import Dawn
 from astropy import units
+import json, inspect
+from os.path import dirname, basename
+
+
+# Ceres constants
+class Ceres(object):
+    # body shape and pole based on DLR RC3 shape model
+    ra = 482.64 * units.km
+    rb = 480.60 * units.km
+    rc = 445.57 * units.km
+    r = np.sqrt((ra+rb)*rc/2)
+    pole = (291.41, 66.79)
+    GM = 62.68 * units.Unit('km3/s2')
+    M = (GM/constants.G).decompose()
+
+
+def get_class_properties(obj, exclude_underscore=True):
+    """Return all properties of input class instance in a dictionary
+    """
+    props = {}
+    for p in dir(obj):
+        props[p] = getattr(obj, p)
+    for p in list(props.keys()):
+        if inspect.ismethod(props[p]):
+            props.pop(p)
+    if exclude_underscore:
+        for p in list(props.keys()):
+            if p.startswith('_'):
+                props.pop(p)
+    return props
+
+
+class MetaData():
+    """
+    Meta data class for imaging and spectroscopic data
+    """
+    def __init__(self, datafile=None, from_json=None, **kwargs):
+        if datafile is not None:
+            self.collect(datafile, **kwargs)
+        elif from_json is not None:
+            self.from_json(from_json)
+
+    def __str__(self):
+        return str(get_class_properties(self))
+
+    def __repr__(self):
+        return str(get_class_properties(self))
+
+    def collect(self, datafile):
+        """
+        Collect meta data from data file
+        """
+        self.path = dirname(datafile)
+        self.name = basename(datafile)
+
+    def load(self, *args, file=None, **kwargs):
+        """
+        Load meta data from JSON string or file
+        """
+        if len(args) > 0:
+            s = json.loads(*args, **kwargs)
+        elif file is not None:
+            with open(file, 'r') as f:
+                s = json.load(f, **kwargs)
+                f.close()
+        for k, v in s.items():
+            setattr(self, k, v)
+
+    def dump(self, file=None, **kwargs):
+        """Dump meta data to a JSON string or file
+        """
+        indent = kwargs.pop('indent', 4)
+        properties = get_class_properties(self)
+        if file is not None:
+            with open(file, 'w') as f:
+                json.dump(properties, f, indent=indent, **kwargs)
+                f.close()
+        else:
+            return json.dumps(properties, indent=4, **kwargs)
+
+
+class ALMACeresImageMetaData(MetaData):
+    """Meta data class for Ceres ALMA images
+    """
+    def collect(self, datafile, spicekernel=None, **kwargs):
+        super().collect(datafile)
+        hdr = fits.open(datafile)[0].header
+        self.bmaj = hdr['bmaj']*3600_000.
+        self.bmin = hdr['bmin']*3600_000.
+        self.bpa = hdr['bpa']*3600_000.
+        self.xscl = hdr['cdelt1']*3600_000.
+        self.yscl = hdr['cdelt2']*3600_000.
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+        if hasattr(self, 'utc_start') and hasattr(self, 'utc_stop'):
+            utc1 = getattr(self, 'utc_start')
+            utc2 = getattr(self, 'utc_stop')
+            self.utc_mid = (Time(utc1)+(Time(utc2)-Time(utc1))/2.).isot
+        sub = self.calc_geometry(spicekernel=spicekernel)
+        sub.remove_column('Time')
+        for k in sub.colnames:
+            setattr(self, k, sub[k][0])
+
+    def calc_geometry(self, spicekernel=None):
+        """Calculate observing geometry
+        """
+        if spicekernel is not None:
+            if not is_iterable(spicekernel):
+                spicekernel = [spicekernel]
+            dummy = [spice.furnsh(k) for k in spicekernel]
+        sub = subcoord(self.utc_mid,'ceres')
+        if spicekernel is not None:
+            dummy = [spice.unload(k) for k in spicekernel]
+        return sub
+
+
+class CycleConfig():
+    def __init__(self, file=None):
+        if file is not None:
+            self.load(file)
+
+    def load(self, file):
+        '''Load cycle configuration from JSON file'''
+        f = open(file, 'r')
+        s = json.load(f)
+        for k,v in s.items():
+            setattr(self, k, v)
+        f.close()
+
+    def dump(self, file):
+        '''Dump cycle configuration to JSON file'''
+        props = get_class_properties(self)
+        with open(file, 'w') as f:
+            json.dump(props, f, indent=4)
+            f.close()
+
 
 class CeresSPICE(object):
     metakernel = '/Users/jyli/work/Ceres/spice/ceres.kernels'
@@ -224,7 +359,7 @@ def brightness_temperature(flux, freq, dist):
         freq = freq*units.Hz
     if not isinstance(dist, units.Quantity):
         dist = dist*units.au
-    area = np.pi*(Dawn.Ceres.r/dist).to('arcsec',equivalencies=units.dimensionless_angles())**2
+    area = np.pi*(Ceres.r/dist).to('arcsec',equivalencies=units.dimensionless_angles())**2
     equiv = units.brightness_temperature(area, freq)
     return flux.to(units.K,equivalencies=equiv)
 
