@@ -1,7 +1,12 @@
+"""Utility module to support ALMA Ceres data analysis
+"""
+
 import numpy as np
-from astropy.io import ascii, fits
-from astropy.table import Table
-from astropy import units, constants
+import numbers, inspect, json
+from os import path
+from astropy.io import fits
+from astropy import units, table, nddata
+import spiceypy as spice
 
 
 def ascii_read(*args, **kwargs):
@@ -9,7 +14,7 @@ def ascii_read(*args, **kwargs):
 
     Same API and functionalities as ascii.read
     Returns the extended Table class'''
-    return Table(ascii.read(*args, **kwargs))
+    return table.Table(ascii.read(*args, **kwargs))
 
 
 def readfits(imfile, ext=0, verbose=True, header=False):
@@ -84,16 +89,16 @@ def readfits(imfile, ext=0, verbose=True, header=False):
         raise TypeError('str or list of str expected, {0} received'.format(type(imfile)))
 
 
-def writefits(imfile, data=None, header=None, name=None, append=False, clobber=False):
+def writefits(imfile, data=None, header=None, name=None, append=False, overwrite=False):
     '''IDL writefits emulator'''
     if append:
         hdu = fits.ImageHDU(data, header=header, name=name)
         hdulist = fits.open(imfile)
         hdulist.append(hdu)
-        hdulist.writeto(imfile, clobber=True)
+        hdulist.writeto(imfile, overwrite=True)
     else:
         hdu = fits.PrimaryHDU(data, header=header)
-        hdu.writeto(imfile, clobber=clobber)
+        hdu.writeto(imfile, overwrite=overwrite)
 
 
 def makenxy(y1, y2, ny, x1, x2, nx, rot=None):
@@ -428,7 +433,6 @@ class Vector(np.ndarray):
 
     def norm(self, order=2):
         '''Compute the normal of vector(s)'''
-        import numbers
         if not isinstance(order, numbers.Integral):
             raise TypeError('`order` must be an integer type.')
         if order < 1:
@@ -685,7 +689,6 @@ class VectRot(np.ndarray):
     def __pow__(self, v):
         if hasattr(v, '__iter__'):
             raise TypeError('power with non-scaler not defined for VectRot type')
-        import numbers
         if not isinstance(v, numbers.Integral):
             raise TypeError('power can only be performed with integer types')
         out = self.copy()
@@ -775,6 +778,125 @@ def vect2proj(vect, viewpt, pa=0.):
     # Rotate along z-axis by position angle
     m3 = VectRot(rotm(pa, axis=2).T)
     return m3*m2*m1*vect
+
+
+def sph2xyz(v, axis=0, row=False, zenith=False):
+    '''
+ Convert input vector(s) from spherical coordinate to Cartesian
+ coordinate
+
+ Parameters
+ ----------
+ v  : 1-D or 2D array-like numbers
+   Vector or column vectors in a 2-D array.  It can be either a 3xN
+   array with each column containing (r, RA, Dec), or a 2xN array with
+   each column containing (RA, Dec).  RA and Dec are in [deg]
+ row : bool, optional
+   If `True`, then the input vectors are considered row-vectors
+ zenith : Bool, optional
+   If set True, then the Dec will be replaced by zenith angle where it
+   starts from 0 at +z-axis increases to 180 deg in the -z-axis.
+
+ Returns
+ -------
+ Returns column vectors of the (x,y,z) for input vector(s).  If only
+ (RA, Dec) available in the input vector, then they are assumed to
+ have unity length.
+
+ v1.0.0 : JYL @PSI, August 9, 2013
+ v1.0.1 : JYL @PSI, December 22, 2013
+   Improved the check of robustness for input array
+ v1.0.2 : JYL @PSI, 2/19, 2016
+   Add keyword `axis`
+ v2.0.0 : JYL @PSI, 2/20/2016
+   Use Vector object to perform calculation
+    '''
+
+    if row:
+        axis = 1
+    if axis != 0:
+        v = np.rollaxis(v, axis)
+    b2, b3 = v
+    b2 = np.deg2rad(b2)
+    b3 = np.deg2rad(b3)
+    b1 = np.ones_like(b2)
+    if zenith:
+        ctype = 'sph'
+    else:
+        ctype = 'geo'
+    v = Vector(b1, b2, b3, type=ctype)
+    return v.xyz
+
+
+def vecsep(v1, v2, directional=False, axis=0, row=False, deg=True):
+    '''
+ Calculate directional separation (angle) from vector v1 to vector v2
+
+ Parameters
+ ----------
+ v1, v2  : 1-D or 2D array-like, floating point
+   3-vector(s) (x,y,z) or 2-vector(s) of (RA, Dec) or (lon, lat).  Can either
+   contain the same number of vectors, or one single vector
+ directional: Bool, optional
+   Specify whether the result angle is directional or undirectional
+ axis : int
+   The axis that defines vectors
+ row : bool, optional
+   If `True`, then the input vectors are considered row-vectors.  This
+   keyword overrides `axis`.
+ deg : bool, optional
+   If `True`, return angles in degrees.  Otherwise in radiance
+
+ Returns
+ -------
+ numpy array of float
+ Returns the angle(s) between v1 and v2, in [0, pi).  If `directional`
+ is `True`, then the angle is measured from v1 to v2 in [0, pi)
+ following right-hand rule with z-axis.  See Notes.
+
+ Notes
+ -----
+ If v1 and v2 are coplanar with z-axis, then x-axis will be used as
+ the reference pole for directional calculation.  If v1 and v2 are in
+ x-z plane, then y-axis will be the reference pole.
+
+ v1.0.0 : JYL @PSI, August 9, 2013
+ v1.0.1 : JYL @PSI, December 22, 2013
+   Remove debug keyword `loop`
+   Add keyword `row` to accept row vectors
+   Add the step to check the validity of input vectors
+ v1.0.2 : JYL @PSI, October 8, 2014
+   Returns a vector if takes only one pair of input vectors
+ v1.1.0 : JYL @PSI, January 23, 2015
+   Add keyword `axis`
+   Prepare to deprecate keyword `row`
+   Optimized flow
+   Increased the flexibility in terms of accepted data type
+ v2.0 : JYL @PSI, 2/20/2016
+   Use Vector class `.vsep` to calculate vector separation
+    '''
+    if row:
+        axis = 1
+    if axis != 0:
+        v1 = np.rollaxis(v1, axis)
+        v2 = np.rollaxis(v2, axis)
+    if len(v1) == 2:
+        b2, b3 = v1
+        b1 = np.ones_like(b2)
+        v1 = Vector(b1, np.deg2rad(b2), np.deg2rad(b3), type='geo')
+    elif len(v1) == 3:
+        v1 = Vector(v1, axis=0)
+    else:
+        raise ValueError('first vector is invalid')
+    if len(v2) == 2:
+        b2, b3 = v2
+        b1 = np.ones_like(b2)
+        v2 = Vector(b1, np.deg2rad(b2), np.deg2rad(b3), type='geo')
+    elif len(v2) == 3:
+        v2 = Vector(v2, axis=0)
+    else:
+        raise ValueError('second vector is invalid')
+    return v1.vsep(v2, directional=directional, deg=deg)
 
 
 def lonlat2xy(lon, lat, r, viewpt, pa=0., center=None, pxlscl=None, deg=True):
@@ -872,66 +994,411 @@ def lonlat2xy(lon, lat, r, viewpt, pa=0., center=None, pxlscl=None, deg=True):
     return x, y
 
 
-class Ceres(object):
-    # body shape and pole based on DLR RC3 shape model
-    ra = 482.64 * units.km
-    rb = 480.60 * units.km
-    rc = 445.57 * units.km
-    r = np.sqrt((ra+rb)*rc/2)
-    pole = (291.41, 66.79)
-    GM = 62.68 * units.Unit('km3/s2')
-    M = (GM/constants.G).decompose()
+def subcoord(time, target, observer='earth', bodyframe=None, saveto=None, planetographic=False):
+    '''
+ Calculate the sub-observer and sub-solar points.
+
+ Parameters
+ ----------
+ time : str, array-like
+   Time(s) to be calculated.  Must be in a format that can be accepted
+   by SPICE.
+ target : str
+   The name of target that SPICE accepts.
+ observer : str, optional
+   The name of observer that SPICE accepts.
+ bodyframe : str, optional
+   The name of the body-fixed coordinate system, if not standard (in
+   the form of target+'_fixed')
+ saveto : str, file, optional
+   Output file
+ planetographic : bool, optional
+   If `True`, then the planetographic coordinates are returned as
+   opposed to planetocentric.
+
+ Return
+ ------
+ Astropy Table:
+   'sslat' : sub-solar latitude
+   'sslon' : sub-solar longitude
+   'solat' : sub-observer latitude
+   'solon' : sub-observer latitude
+   'rh' : heliocentric distance
+   'range' : observer distance
+   'phase' : phase angle
+   'polepa' : position angle of pole
+   'poleinc' : inclination of pole
+   'sunpa' : position angle of the Sun
+   'suninc' : inclination angle of the Sun
+ Position angles are measured from celestial N towards E.  inclination
+ angles are measured from sky plane (0 deg) towards observer (+90).
+ All angles are in deg, all distances are in AU
+
+ v1.0.0 : JYL @PSI, May 23, 2014
+ v1.0.1 : JYL @PSI, July 8, 2014
+   Modified the call to spice.gdpool to accomodate a behavior that is
+   different from what I remember
+   Modified the call to spice.str2et
+ v1.0.2 : JYL @PSI, July 15, 2014
+   Changed the calculation of pole orientation to accomodate the case
+   where the frame is expressed in the kernel pool differently than
+   for small bodies.
+ v1.0.3 : JYL @PSI, October 8, 2014
+   Fixed the bug when input time is a scalor
+   Change return to an astropy Table
+ v1.0.4 : JYL @PSI, November 19, 2014
+   Small bug fix for the case when input time is a scalor
+   Small bug fix for the output table unit and format
+ v1.0.5 : JYL @PSI, October 14, 2015
+   Add keyword `planetographic`
+   Add target RA and Dec in the return table
+   Increased robustness for the case when no body frame is defined
+   Change the table headers to start with capital letters
+   Improve the program structure
+    '''
+
+    # Determine whether kernel pool for body frame exists
+    if bodyframe is None:
+        bodyframe = target+'_fixed'
+    try:
+        kp = spice.gipool('FRAME_'+bodyframe.upper(),0,1)
+    except spice.utils.support_types.SpiceyError:
+        kp = None
+    if kp is not None:
+        code = kp[0]
+        polera = spice.bodvrd(target, 'POLE_RA', 3)[1][0]
+        poledec = spice.bodvrd(target, 'POLE_DEC', 3)[1][0]
+        r_a, r_b, r_c = spice.bodvrd(target, 'RADII', 3)[1]
+        r_e = (r_a+r_b)/2
+        flt = (r_e-r_c)/r_e
+
+    # Process input time
+    if isinstance(time,str):
+        et = [spice.str2et(time)]
+        time = [time]
+    elif (not isinstance(time, (str,bytes))) and hasattr(time, '__iter__'):
+        et = [spice.str2et(x) for x in time]
+    else:
+        raise TypeError('str or list of str expected, {0} received'.format(type(time)))
+
+    # Prepare for iteration
+    sslat, sslon, solat, solon, rh, delta, phase, polepa, poleinc, sunpa, suninc, tgtra, tgtdec = [], [], [], [], [], [], [], [], [], [], [], [], []
+    if kp is None:
+        workframe = 'J2000'
+    else:
+        workframe = bodyframe
+
+    # Iterate over time
+    for t in et:
+
+        # Target position (r, RA, Dec)
+        pos1, lt1 = spice.spkpos(target, t, 'J2000', 'lt+s', observer)
+        pos1 = np.array(pos1)
+        rr, ra, dec = spice.recrad(pos1)
+        delta.append(rr*units.km.to(units.au))
+        tgtdec.append(np.rad2deg(dec))
+        tgtra.append(np.rad2deg(ra))
+
+        # Heliocentric distance
+        pos2, lt2 = spice.spkpos('sun', t-lt1, 'J2000', 'lt+s', target)
+        from numpy.linalg import norm
+        rh.append(norm(pos2)*units.km.to('au'))
+
+        # Phase angle
+        phase.append(vecsep(-pos1, pos2, directional=False))
+
+        # Sun angle
+        m = np.array(spice.twovec(-pos1, 3, [0,0,1.], 1))
+        rr, lon, lat = spice.recrad(m.dot(pos2))
+        sunpa.append(np.rad2deg(lon))
+        suninc.append(np.rad2deg(lat))
+
+        if kp is not None:
+
+            # Sub-observer point
+            pos1, lt1 = spice.spkpos(target, t, bodyframe, 'lt+s', observer)
+            pos1 = np.array(pos1)
+            if planetographic:
+                lon, lat, alt = spice.recpgr(target, -pos1, r_e, flt)
+            else:
+                rr, lon, lat = spice.recrad(-pos1)
+            solat.append(np.rad2deg(lat))
+            solon.append(np.rad2deg(lon))
+
+            # Sub-solar point
+            pos2, lt2 = spice.spkpos('sun', t-lt1, bodyframe, 'lt+s', target)
+            lon, lat, alt = spice.recpgr(target, pos2, r_e, 0.9)
+            #print np.rad2deg(lon), np.rad2deg(lat)
+            rr, lon, lat = spice.recrad(pos2)
+            #print np.rad2deg(lon), np.rad2deg(lat)
+            if planetographic:
+                lon, lat, alt = spice.recpgr(target, pos2, r_e, flt)
+            else:
+                rr, lon, lat = spice.recrad(pos2)
+            sslon.append(np.rad2deg(lon))
+            sslat.append(np.rad2deg(lat))
+
+            # North pole angle
+            pole = [polera, poledec]
+            rr, lon, lat = spice.recrad(m.dot(sph2xyz(pole)))
+            polepa.append(np.rad2deg(lon))
+            poleinc.append(np.rad2deg(lat))
+
+    if kp is None:
+        tbl = table.Table((time, rh, delta, phase, tgtra, tgtdec), names='Time rh Range Phase RA Dec'.split())
+    else:
+        tbl = table.Table((time, rh, delta, phase, tgtra, tgtdec, solat, solon, sslat, sslon, polepa, poleinc, sunpa, suninc), names='Time rh Range Phase RA Dec SOLat SOLon SSLat SSLon PolePA PoleInc SunPA SunInc'.split())
+
+    for c in tbl.colnames[1:]:
+        tbl[c].format='%.2f'
+        tbl[c].unit = units.deg
+    tbl['Time'].format='%s'
+    tbl['Time'].unit=None
+    tbl['rh'].format = '%.4f'
+    tbl['rh'].unit = units.au
+    tbl['Range'].format = '%.4f'
+    tbl['Range'].unit = units.au
+    if saveto is not None:
+        tbl.write(saveto)
+
+    return tbl
 
 
-if __name__ == '__main__':
+def obj2dict(obj, exclude=['_','__']):
+    """Return all properties of input class instance in a dictionary
+    """
+    d = dict(
+        (key, value)
+        for key, value in inspect.getmembers(obj)
+        if not inspect.isabstract(value)
+        and not inspect.isbuiltin(value)
+        and not inspect.isfunction(value)
+        and not inspect.isgenerator(value)
+        and not inspect.isgeneratorfunction(value)
+        and not inspect.ismethod(value)
+        and not inspect.ismethoddescriptor(value)
+        and not inspect.isroutine(value)
+    )
+    if len(exclude) > 0:
+        for p in list(d.keys()):
+            for e in exclude:
+                if p.startswith(e):
+                    d.pop(p)
+                    break
+    return d
 
-    datadir = '/Users/jyli/work/Ceres/ALMA/Data/Cycle3/Processed/CERES_c2/'
-    aspfile = '/Users/jyli/work/Ceres/ALMA/Data/Cycle3/Processed/Ceres_c.csv'
-    ctfile = '/Users/jyli/work/Ceres/ALMA/Modeling/center_c.csv'
 
-    asp = ascii_read(aspfile)
-    ct = ascii_read(ctfile)
+class ObjectEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if hasattr(obj, 'to_json'):
+            return self.default(obj.to_json())
+        elif hasattr(obj, '__dict__'):
+            d = obj2dict(obj)
+            return self.default(d)
+        else:
+            return obj
 
-    ims = []
-    lsts = []
-    emis = []
-    rc = Ceres.ra.value, Ceres.rb.value, Ceres.rc.value
-    for r,c in zip(asp,ct):
-        # load image
-        fname = datadir+r['File'].replace('_selfcal','')
-        print(fname)
-        im = readfits(fname,verbose=False)
-        im = np.squeeze(im)
-        im /= np.pi*r['BMAJ']*r['BMIN']*1e-6/4
 
-        # project to (lon, lat)
-        lat,lon = makenxy(-90,90,91,0,358,180)
-        vpt = Vector(1., r['SOLon'], r['SOLat'], type='geo', deg=True)
-        pxlscl = r['Range']*1.496e8*r['xscl']/206265000.
-        x,y = lonlat2xy(lon,lat,rc,vpt,pa=r['PolePA'],center=(c['yc'],c['xc']),pxlscl=pxlscl)
-        w = np.isfinite(x) & np.isfinite(y)
-        b = np.zeros_like(x)
-        b[w] = im[np.round(y[w]).astype(int),np.round(x[w]).astype(int)]
+class JSONSerializable():
+    """A base class to serialize class objects
+    """
+    def __init__(self, from_string=None, from_file=None, **kwargs):
+        if from_string is not None or from_file is not None:
+            self.from_json(string=from_string, file=from_file, **kwargs)
 
-        # calculate local solar time
-        lst = ((lon-r['SSLon'])/15+12) % 24
+    def __str__(self):
+        return str(obj2dict(self))
 
-        # calculate emission angle
-        emi = Vector(np.ones_like(lon),lon,lat,type='geo',deg=True).vsep(Vector(1,r['SOLon'],r['SOLat'],type='geo',deg=True))
+    def __repr__(self):
+        return str(obj2dict(self))
 
-        # save projection
-        writefits('/Users/jyli/work/Ceres/ALMA/Modeling/projected/'+r['File'],b,  clobber=True)
-        writefits('/Users/jyli/work/Ceres/ALMA/Modeling/projected/'+r['File'],lst ,name='LST',append=True)
+    def from_json(self, string=None, file=None, **kwargs):
+        """
+        Load meta data from JSON string or file
+        """
+        if string is None and file is None:
+            raise IOError('input string or file not supplied')
+        if string is not None:
+            s = json.loads(string, **kwargs)
+        elif file is not None:
+            with open(file, 'r') as f:
+                s = json.load(f, **kwargs)
+                f.close()
+        for k, v in s.items():
+            setattr(self, k, v)
 
-        # collect images and lst
-        ims.append(b)
-        lsts.append(lst)
-        emis.append(emi)
+    def to_json(self, saveto=None, **kwargs):
+        """Dump meta data to a JSON string or file
+        """
+        if saveto is not None:
+            indent = kwargs.pop('indent', 4)
+            with open(saveto, 'w') as f:
+                json.dump(self, f, default=obj2dict, indent=indent, **kwargs)
+                f.close()
+        else:
+           return obj2dict(self)
 
-    ims = np.array(ims)
-    lsts = np.array(lsts)
-    emis = np.array(emis)
-    data = np.stack((ims,lsts,emis))
-    hdr = fits.Header()
-    hdr['bunit'] = 'Jy/arcsec**2'
-    writefits('/Users/jyli/work/Ceres/ALMA/Modeling/fluxes_lst_c.fits',data,hdr,clobber=True)
+
+class MetaData(JSONSerializable):
+    """
+    Meta data class for imaging and spectroscopic data
+    """
+    def __init__(self, datafile=None, **kwargs):
+        super().__init__(**kwargs)
+        if datafile is not None:
+            self.collect(datafile, **kwargs)
+
+    def collect(self, datafile):
+        """
+        Collect meta data from data file
+        """
+        self.path = path.dirname(datafile)
+        self.name = path.basename(datafile)
+
+
+class MetaDataList(list):
+    """List of image meta data
+    """
+    def __init__(self, cls, **kwargs):
+        """
+        cls : name of `MetaData` or its subclass
+        """
+        super().__init__(**kwargs)
+        self.member_class = cls
+
+    def collect(self, datafiles, **kwargs):
+        pars = []
+        for i in range(len(datafiles)):
+            p = {}
+            if len(kwargs) > 0:
+                for k in kwargs.keys():
+                    p[k] = kwargs[k][i]
+            pars.append(p)
+        for f, p in zip(datafiles, pars):
+            meta = self.member_class()
+            meta.collect(f, **p)
+            self.append(meta)
+
+    def to_json(self, saveto=None, **kwargs):
+        """Dump meta data collection to a JSON string or file
+        """
+        indent = kwargs.pop('indent', 4)
+        out = [obj2dict(m) for m in self]
+        if saveto is not None:
+            with open(saveto, 'w') as f:
+                json.dump(out, f, indent=indent, **kwargs)
+                f.close()
+        else:
+            return json.dumps(out, indent=indent, **kwargs)
+
+    def to_table(self, saveto=None, overwrite=False):
+        """Return meta data as an astropy Table class object
+        """
+        if len(self) == 0:
+            return None
+        nn = len(self)
+        out = {}
+        for k in obj2dict(self[0]).keys():
+            out[k] = [getattr(m, k) for m in self]
+        out = table.Table(out)
+        if saveto is not None:
+            out.write(saveto, overwrite=overwrite)
+        else:
+            return out
+
+
+def centroid(im, center=None, error=None, mask=None, method=0, box=6, tol=0.01, maxiter=50, threshold=None, verbose=False):
+    '''Wrapper for photutils.centroiding functions
+
+    Parameters
+    ----------
+    im : array-like, astropy.nddata.NDData or subclass
+      Input image
+    center : (y, x), optional
+      Preliminary center to start the search
+    error : array-like, optional
+      Error of the input image.  If `im` is NDData type, then `error` will
+      be extracted from NDData.uncertainty.  This keyword overrides the
+      uncertainty in NDData.
+    mask : array-like bool, optional
+      Mask of input image.  If `im` is NDData type, then `mask` will be
+      extracted from NDData.mask.  This keyword overrides the mask in NDData.
+    method : int or str, optional
+      Method of centroiding:
+      [0, '2dg', 'gaussian'] - 2-D Gaussian
+      [1, 'com'] - Center of mass
+      [2, 'geom', 'geometric'] - Geometric center
+    box : int, optional
+      Box size for the search
+    tol : float, optional
+      The tolerance in pixels of the center.  Program exits iteration when
+      new center differs from the previous iteration less than `tol` or number
+      of iteration reaches `maxiter`.
+    maxiter : int, optional
+      The maximum number of iterations in the search
+    threshold : number, optional
+      Threshold, only used for method=2
+    verbose : bool, optional
+      Print out information
+
+    Returns
+    -------
+    (y, x) as a numpy array
+
+    This program uses photutils.centroids.centroid_2dg() or .centroid_com()
+
+    v1.0.0 : JYL @PSI, Feb 19, 2015
+    '''
+    from photutils.centroids import centroid_2dg, centroid_com
+    if isinstance(im, nddata.NDData):
+        if error is None:
+            if im.uncertainty is not None:
+                error = im.uncertainty.array
+        if mask is None:
+            if im.mask is not None:
+                mask = im.mask
+        im = im.data
+
+    if center is None:
+        center = np.asarray(im.shape)/2.
+    else:
+        center = np.asarray(center)
+    b2 = box/2
+    if (method in [2, 'geom', 'geometric']) and (threshold is None):
+        raise ValueError('threshold is not specified')
+    if verbose:
+        print(('Image provided as a '+str(type(im))+', shape = ', im.shape))
+        print(('Centroiding image in {0}x{0} box around ({1},{2})'.format(box,center[0],center[1])))
+        print(('Error array '+condition(error is None, 'not ', ' ')+'provided'))
+        print(('Mask array '+condition(mask is None, 'not ', ' ')+'provided'))
+    i = 0
+    delta_center = np.array([1e5,1e5])
+    while (i < maxiter) and (delta_center.max() > tol):
+        if verbose:
+            print(('  iteration {0}, center = ({1},{2})'.format(i, center[0], center[1])))
+        p1, p2 = np.floor(center-b2).astype('int'), np.ceil(center+b2).astype('int')
+        subim = np.asarray(im[p1[0]:p2[0],p1[1]:p2[1]])
+        if error is None:
+            suberr = None
+        else:
+            suberr = np.asarray(error[p1[0]:p2[0],p1[1]:p2[1]])
+        if mask is None:
+            submask = None
+        else:
+            submask = np.asarray(mask[p1[0]:p2[0],p1[1]:p2[1]])
+        if method in [0, '2dg', 'gaussian']:
+            xc, yc = centroid_2dg(subim, error=suberr, mask=submask)
+        elif method in [1, 'com']:
+            xc, yc = centroid_com(subim, mask=submask)
+        elif method in [2, 'geom', 'geometric']:
+            xc, yc = geometric_center(subim, threshold, mask=submask)
+        else:
+            raise ValueError("unrecognized `method` {0} received.  Should be [0, '2dg', 'gaussian'] or [1, 'com']".format(method))
+        center1 = np.asarray([yc+p1[0], xc+p1[1]])
+        delta_center = abs(center1-center)
+        center = center1
+        i += 1
+
+    if verbose:
+        print(('centroid = ({0},{1})'.format(center[0],center[1])))
+    return center

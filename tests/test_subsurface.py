@@ -3,76 +3,7 @@
 # 5/11/2017, JYL @PSI
 
 import numpy
-
-class snell(object):
-
-    def __init__(self, n1, n2=1., deg=True):
-        self.n1 = n1
-        self.n2 = n2
-        self.deg = True
-
-    def angle1(self, angle2):
-        if self.deg:
-            angle2 = numpy.deg2rad(angle2)
-        a1 = numpy.arcsin(self.n2/self.n1 * numpy.sin(angle2))
-        if self.deg:
-            a1 = numpy.rad2deg(a1)
-        return a1
-
-    def angle2(self, angle1):
-        if self.deg:
-            angle1 = numpy.deg2rad(angle1)
-        a2 = numpy.arcsin(self.n1/self.n2*numpy.sin(angle1))
-        if self.deg:
-            a2 = numpy.rad2deg(a2)
-        return a2
-
-
-# absorption length
-absorption_length = lambda n, loss_tangent, wavelength=1.: wavelength/(4*numpy.pi*n)*(2./((1+loss_tangent*loss_tangent)**0.5-1))**0.5
-
-# absorption length
-absorption_coefficient = lambda n, loss_tangent, wavelength=1.: 1./absorption_length(n, loss_tangent, wavelength)
-
-
-class surface(object):
-
-    def __init__(self, T, n, loss_tangent=None, absorption_length=None, wavelength=1., emissivity=1.):
-        self.T = T  # temperature profile where T(z) is the temperature at z
-        self.n = n  # refractive index
-        self.emissivity = emissivity
-        self.loss_tangent = loss_tangent  # loss tangent
-        if absorption_length is not None:
-            # set loss tangent through absorption length and override loss_tangent parameter
-            self.loss_tangent = ((2*(wavelength/(4*numpy.pi*self.n*absorption_length))**2+1)**2-1)**0.5
-        if self.loss_tangent is None:
-            raise ValueError('either `loss_tangent` or `absorption_length` has to be specified')
-
-    def Tb(self, emi, wavelength, epsrel=1e-4):
-        '''Calculate brightness temperature with subsurface emission
-        accounted for'''
-        if hasattr(emi,'__iter__'):
-            emi = numpy.asanyarray(emi)
-            results = numpy.zeros_like(emi).flatten()
-            emi_flat = emi.flatten()
-            for i in range(len(results)):
-                results[i] = self.Tb(emi_flat[i], wavelength=wavelength, epsrel=epsrel)
-            return results.reshape(emi.shape)
-
-        s = snell(n)
-        inc = s.angle1(emi)
-        coef = 1/self.absorption_length(wavelength)   # absorption coefficient
-        sec_i = 1./numpy.cos(numpy.deg2rad(inc))
-        intfunc = lambda z: self.T(z) * numpy.exp(-coef*sec_i*z)
-        from scipy.integrate import quad
-        integral = quad(intfunc, 0, numpy.inf, epsrel=epsrel)[0]
-        return self.emissivity*sec_i*coef * integral
-
-    def absorption_length(self, wavelength=1.):
-        '''Electrical skin depth, or absorption length
-        If wavelength is not specified, then it returns Le in unit of wavelength'''
-        return absorption_length(self.n, self.loss_tangent, wavelength)
-
+from ..core import surface
 
 # Some tests
 if __name__ == '__main__':
