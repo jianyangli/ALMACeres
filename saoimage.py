@@ -1,602 +1,155 @@
-"""Utility module to support ALMA Ceres data analysis
-"""
+'''Extended DS9 class moduel'''
+
 
 import numpy as np
-import numbers, inspect, json
-from os import path
-from astropy.io import fits
-from astropy import units, table, nddata
-import spiceypy as spice
-from .vector import vecsep, sph2xyz
+__all__ = ['Region', 'CircularRegion', 'EllipseRegion', 'BoxRegion', 'AnnulusRegion', 'DS9', 'getds9']
 
+class Region(object):
+    '''Base class for DS9 regions'''
 
-def is_iterable(v):
-    """Check whether a variable is iterable"""
-    if isinstance(v, (str, bytes)):
-        return False
-    elif hasattr(v, '__iter__'):
-        return True
-    else:
-        return False
+    parname = ('x', 'y')
+    specs = {}
+    _shape = None
+    zerobased = True
+    size = None
 
+    def __init__(self, *args, **kwargs):
+        '''The initialization of Region class depends on its shape.
+        The general form is:
 
-def ascii_read(*args, **kwargs):
-    '''astropy.io.ascii.read wrapper
+        r = Region(shape, *par, frame=None, ds9=None)
 
-    Same API and functionalities as ascii.read
-    Returns the extended Table class'''
-    return table.Table(ascii.read(*args, **kwargs))
+        shape : str
+          The shape of region, same as defined in DS9
+        *par : numbers
+          The parameters for shape, same definition and order as in
+          DS9.get('regions -format saoimage')
 
+        To subclass Region for specific shape:
 
-def headfits(imfile, ext=0, verbose=True):
-    '''IDL headfits emulator.
+        class BoxRegion(Region):
+            parname = ('x', 'y', 'a', 'b', 'angle')
+            _shape = 'box'
+            size = ('a', 'b')
 
- Parameters
- ----------
- imfile : string, or list of string
-   FITS file name(s)
- ext : non-negative integer, optional
-   The extension to be read in
- verbose : bool, optional
-   Suppress the screen print of FITS information if False
+        The initialization of subclass is now simply:
 
- Returns
- -------
- astropy.io.fits.header.Header instance, or list of it
+        r = BoxRegion(x, y, a, b, angle)
 
- v1.0.0 : JYL @PSI, Nov 17, 2013
-    '''
+        v1.0.0 : JYL @PSI, 3/6/2015
+        v1.0.1 : JYL @PSI, 1/5/2017
+          Added property .specs to store the properties of the region, such as
+          color, width, etc.
+        '''
 
-    if is_iterable(imfile):
-        return [headfits(f,ext=ext,verbose=verbose) for f in imfile]
-    elif not isinstance(imfile, (str, bytes)):
-        raise ValueError('string types or iterable expected, {0} received'.format(type(imfile)))
+        if len(self.parname) != len(args):
+            raise TypeError('{0}.__init__() takes {1} arguments ({2} given)'.format(type(self),len(self.parname)+1,len(args)+1))
+        if self._shape is None:
+            self._shape = kwargs.pop('shape', None)
+        self.frame = kwargs.pop('frame', None)
+        self.ds9 = kwargs.pop('ds9', None)
+        self.zerobased = kwargs.pop('zerobased', True)
+        for i in range(len(args)):
+            self.__dict__[self.parname[i]] = args[i]
+        if self._shape is None:
+            raise Warning('region shape is not defined')
+        self.specs['color'] = kwargs.pop('color', 'green')
+        self.specs['width'] = kwargs.pop('width', 1)
 
-    fitsfile = fits.open(imfile)
-    if verbose:
-        fitsfile.info()
+    @property
+    def shape(self):
+        return self._shape
 
-    if ext >= len(fitsfile):
-        print()
-        print(('Error: Extension '+repr(ext)+' does not exist!'))
-        return None
+    @property
+    def par(self):
+        v = []
+        for k in self.parname:
+            v.append(self.__dict__[k])
+        return v
 
-    if fitsfile[ext].data is None:
-        print()
-        print(('Error: Extension '+repr(ext)+' contains no image!'))
-        return None
+    @property
+    def xmin(self):
+        if self.size is None:
+            raise ValueError('size of region not defined')
+        return self.x-self.__dict__[self.size[0]]/2.
 
-    return fitsfile[ext].header
+    @property
+    def xmax(self):
+        if self.size is None:
+            raise ValueError('size of region not defined')
+        return self.x+self.__dict__[self.size[0]]/2.
 
+    @property
+    def ymin(self):
+        if self.size is None:
+            raise ValueError('size of region not defined')
+        return self.y-self.__dict__[self.size[1]]/2.
 
-def readfits(imfile, ext=0, verbose=True, header=False):
-    '''IDL readfits emulator.
-
- Parameters
- ----------
- imfile : string, or list of strings
-   FITS file name(s)
- ext : non-negative integer, optional
-   The extension to be read in
- verbose : bool, optional
-   Suppress the screen print of FITS information if False
- header : bool, optional
-   If `True`, then (image, header) tuple will be returned
-
- Returns
- -------
- image, or tuple : (image, header)
-   image : ndarray or list of ndarray of float32
-   header : astropy.io.fits.header.Header instance, or list of it
-
- v1.0.0 : JYL @PSI, Nov 17, 2013
- v1.0.1 : JYL @PSI, 5/26/2015
-   Accept extension name for `ext`.
-   Return the actual header instead of `None` even if extension
-     contains no data
-   Returned data retains the original data type in fits.
-    '''
-
-    if isinstance(imfile, (str,bytes)):
-        fitsfile = fits.open(imfile)
-        if verbose:
-            fitsfile.info()
-
-        try:
-            extindex = fitsfile.index_of(ext)
-        except KeyError:
-            print()
-            print(('Error: Extension {0} not found'.format(ext)))
-            if header:
-                return None, None
-            else:
-                return None
-
-        if extindex >= len(fitsfile):
-            print()
-            print(('Error: Requested extension number {0} does not exist'.format(extindex)))
-            img, hdr = None, None
-        else:
-            hdr = fitsfile[extindex].header
-            if fitsfile[extindex].data is None:
-                print()
-                print(('Error: Extension {0} contains no image'.format(ext)))
-                img = None
-            else:
-                img = fitsfile[extindex].data
-
-        if header:
-            return img, hdr
-        else:
-            return img
-    elif hasattr(imfile,'__iter__'):
-
-        img = [readfits(f, ext=ext, verbose=verbose) for f in imfile]
-        if header:
-            return img, headfits(imfile, ext=ext, verbose=verbose)
-        else:
-            return img
-
-    else:
-        raise TypeError('str or list of str expected, {0} received'.format(type(imfile)))
-
-
-def writefits(imfile, data=None, header=None, name=None, append=False, overwrite=False):
-    '''IDL writefits emulator'''
-    if append:
-        hdu = fits.ImageHDU(data, header=header, name=name)
-        hdulist = fits.open(imfile)
-        hdulist.append(hdu)
-        hdulist.writeto(imfile, overwrite=True)
-    else:
-        hdu = fits.PrimaryHDU(data, header=header)
-        hdu.writeto(imfile, overwrite=overwrite)
-
-
-def makenxy(y1, y2, ny, x1, x2, nx, rot=None):
-    '''Make 2-d y and x coordinate arrays of specified dimensions
-  (Like IDL JHU/APL makenxy.pro)
-
- Parameters
- ----------
- y1, y2 : float
-   Min and max coordinate of the first dimension in output array
- ny : float
-   Number of steps in the first dimension
- x1, x2 : float
-   Min and max coordinate of the second dimension in output array
- nx : float
-   Number of steps in the second dimension
- rot : float
-   Rotation of arrays
-
- Returns
- -------
- yarray, xarray : 2-D arrays
-
- v1.0.0 : JYL @PSI, June 2, 2014
-    '''
-
-    y, x = np.indices((ny,nx), float)
-    y = y*(y2-y1)/(ny-1)+y1
-    x = x*(x2-x1)/(nx-1)+x1
-
-    if rot is not None:
-        m = rotm(rot)
-        x, y = m[0,0]*x+m[0,1]*y, m[1,0]*x+m[1,1]*y
-
-    return np.array((y, x))
-
-
-def subcoord(time, target, observer='earth', bodyframe=None, saveto=None, planetographic=False):
-    '''
- Calculate the sub-observer and sub-solar points.
-
- Parameters
- ----------
- time : str, array-like
-   Time(s) to be calculated.  Must be in a format that can be accepted
-   by SPICE.
- target : str
-   The name of target that SPICE accepts.
- observer : str, optional
-   The name of observer that SPICE accepts.
- bodyframe : str, optional
-   The name of the body-fixed coordinate system, if not standard (in
-   the form of target+'_fixed')
- saveto : str, file, optional
-   Output file
- planetographic : bool, optional
-   If `True`, then the planetographic coordinates are returned as
-   opposed to planetocentric.
-
- Return
- ------
- Astropy Table:
-   'sslat' : sub-solar latitude
-   'sslon' : sub-solar longitude
-   'solat' : sub-observer latitude
-   'solon' : sub-observer latitude
-   'rh' : heliocentric distance
-   'range' : observer distance
-   'phase' : phase angle
-   'polepa' : position angle of pole
-   'poleinc' : inclination of pole
-   'sunpa' : position angle of the Sun
-   'suninc' : inclination angle of the Sun
- Position angles are measured from celestial N towards E.  inclination
- angles are measured from sky plane (0 deg) towards observer (+90).
- All angles are in deg, all distances are in AU
-
- v1.0.0 : JYL @PSI, May 23, 2014
- v1.0.1 : JYL @PSI, July 8, 2014
-   Modified the call to spice.gdpool to accomodate a behavior that is
-   different from what I remember
-   Modified the call to spice.str2et
- v1.0.2 : JYL @PSI, July 15, 2014
-   Changed the calculation of pole orientation to accomodate the case
-   where the frame is expressed in the kernel pool differently than
-   for small bodies.
- v1.0.3 : JYL @PSI, October 8, 2014
-   Fixed the bug when input time is a scalor
-   Change return to an astropy Table
- v1.0.4 : JYL @PSI, November 19, 2014
-   Small bug fix for the case when input time is a scalor
-   Small bug fix for the output table unit and format
- v1.0.5 : JYL @PSI, October 14, 2015
-   Add keyword `planetographic`
-   Add target RA and Dec in the return table
-   Increased robustness for the case when no body frame is defined
-   Change the table headers to start with capital letters
-   Improve the program structure
-    '''
-
-    # Determine whether kernel pool for body frame exists
-    if bodyframe is None:
-        bodyframe = target+'_fixed'
-    try:
-        kp = spice.gipool('FRAME_'+bodyframe.upper(),0,1)
-    except spice.utils.support_types.SpiceyError:
-        kp = None
-    if kp is not None:
-        code = kp[0]
-        polera = spice.bodvrd(target, 'POLE_RA', 3)[1][0]
-        poledec = spice.bodvrd(target, 'POLE_DEC', 3)[1][0]
-        r_a, r_b, r_c = spice.bodvrd(target, 'RADII', 3)[1]
-        r_e = (r_a+r_b)/2
-        flt = (r_e-r_c)/r_e
-
-    # Process input time
-    if isinstance(time,str):
-        et = [spice.str2et(time)]
-        time = [time]
-    elif (not isinstance(time, (str,bytes))) and hasattr(time, '__iter__'):
-        et = [spice.str2et(x) for x in time]
-    else:
-        raise TypeError('str or list of str expected, {0} received'.format(type(time)))
-
-    # Prepare for iteration
-    sslat, sslon, solat, solon, rh, delta, phase, polepa, poleinc, sunpa, suninc, tgtra, tgtdec = [], [], [], [], [], [], [], [], [], [], [], [], []
-    if kp is None:
-        workframe = 'J2000'
-    else:
-        workframe = bodyframe
-
-    # Iterate over time
-    for t in et:
-
-        # Target position (r, RA, Dec)
-        pos1, lt1 = spice.spkpos(target, t, 'J2000', 'lt+s', observer)
-        pos1 = np.array(pos1)
-        rr, ra, dec = spice.recrad(pos1)
-        delta.append(rr*units.km.to(units.au))
-        tgtdec.append(np.rad2deg(dec))
-        tgtra.append(np.rad2deg(ra))
-
-        # Heliocentric distance
-        pos2, lt2 = spice.spkpos('sun', t-lt1, 'J2000', 'lt+s', target)
-        from numpy.linalg import norm
-        rh.append(norm(pos2)*units.km.to('au'))
-
-        # Phase angle
-        phase.append(vecsep(-pos1, pos2, directional=False))
-
-        # Sun angle
-        m = np.array(spice.twovec(-pos1, 3, [0,0,1.], 1))
-        rr, lon, lat = spice.recrad(m.dot(pos2))
-        sunpa.append(np.rad2deg(lon))
-        suninc.append(np.rad2deg(lat))
-
-        if kp is not None:
-
-            # Sub-observer point
-            pos1, lt1 = spice.spkpos(target, t, bodyframe, 'lt+s', observer)
-            pos1 = np.array(pos1)
-            if planetographic:
-                lon, lat, alt = spice.recpgr(target, -pos1, r_e, flt)
-            else:
-                rr, lon, lat = spice.recrad(-pos1)
-            solat.append(np.rad2deg(lat))
-            solon.append(np.rad2deg(lon))
-
-            # Sub-solar point
-            pos2, lt2 = spice.spkpos('sun', t-lt1, bodyframe, 'lt+s', target)
-            lon, lat, alt = spice.recpgr(target, pos2, r_e, 0.9)
-            #print np.rad2deg(lon), np.rad2deg(lat)
-            rr, lon, lat = spice.recrad(pos2)
-            #print np.rad2deg(lon), np.rad2deg(lat)
-            if planetographic:
-                lon, lat, alt = spice.recpgr(target, pos2, r_e, flt)
-            else:
-                rr, lon, lat = spice.recrad(pos2)
-            sslon.append(np.rad2deg(lon))
-            sslat.append(np.rad2deg(lat))
-
-            # North pole angle
-            pole = [polera, poledec]
-            rr, lon, lat = spice.recrad(m.dot(sph2xyz(pole)))
-            polepa.append(np.rad2deg(lon))
-            poleinc.append(np.rad2deg(lat))
-
-    if kp is None:
-        tbl = table.Table((time, rh, delta, phase, tgtra, tgtdec), names='Time rh Range Phase RA Dec'.split())
-    else:
-        tbl = table.Table((time, rh, delta, phase, tgtra, tgtdec, solat, solon, sslat, sslon, polepa, poleinc, sunpa, suninc), names='Time rh Range Phase RA Dec SOLat SOLon SSLat SSLon PolePA PoleInc SunPA SunInc'.split())
-
-    for c in tbl.colnames[1:]:
-        tbl[c].format='%.2f'
-        tbl[c].unit = units.deg
-    tbl['Time'].format='%s'
-    tbl['Time'].unit=None
-    tbl['rh'].format = '%.4f'
-    tbl['rh'].unit = units.au
-    tbl['Range'].format = '%.4f'
-    tbl['Range'].unit = units.au
-    if saveto is not None:
-        tbl.write(saveto)
-
-    return tbl
-
-
-def obj2dict(obj, exclude=['_','__']):
-    """Return all properties of input class instance in a dictionary
-    """
-    d = dict(
-        (key, value)
-        for key, value in inspect.getmembers(obj)
-        if not inspect.isabstract(value)
-        and not inspect.isbuiltin(value)
-        and not inspect.isfunction(value)
-        and not inspect.isgenerator(value)
-        and not inspect.isgeneratorfunction(value)
-        and not inspect.ismethod(value)
-        and not inspect.ismethoddescriptor(value)
-        and not inspect.isroutine(value)
-    )
-    if len(exclude) > 0:
-        for p in list(d.keys()):
-            for e in exclude:
-                if p.startswith(e):
-                    d.pop(p)
-                    break
-    return d
-
-
-class ObjectEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if hasattr(obj, 'to_json'):
-            return self.default(obj.to_json())
-        elif hasattr(obj, '__dict__'):
-            d = obj2dict(obj)
-            return self.default(d)
-        else:
-            return obj
-
-
-class JSONSerializable():
-    """A base class to serialize class objects
-    """
-    def __init__(self, from_string=None, from_file=None, **kwargs):
-        if from_string is not None or from_file is not None:
-            self.from_json(string=from_string, file=from_file, **kwargs)
-
-    def __str__(self):
-        return str(obj2dict(self))
+    @property
+    def ymax(self):
+        if self.size is None:
+            raise ValueError('size of region not defined')
+        return self.y+self.__dict__[self.size[1]]/2.
 
     def __repr__(self):
-        return str(obj2dict(self))
+        return '<'+super(Region, self).__repr__().split()[0].split('.')[-1]+'('+self.__str__().split('(')[1]+'>'
 
-    def from_json(self, string=None, file=None, **kwargs):
-        """
-        Load meta data from JSON string or file
-        """
-        if string is None and file is None:
-            raise IOError('input string or file not supplied')
-        if string is not None:
-            s = json.loads(string, **kwargs)
-        elif file is not None:
-            with open(file, 'r') as f:
-                s = json.load(f, **kwargs)
-                f.close()
-        for k, v in s.items():
-            setattr(self, k, v)
+    def __str__(self):
+        par = []
+        for k in self.parname:
+            par.append(self.__dict__[k])
+        return str(self.shape)+str(tuple(par))
 
-    def to_json(self, saveto=None, **kwargs):
-        """Dump meta data to a JSON string or file
-        """
-        if saveto is not None:
-            indent = kwargs.pop('indent', 4)
-            with open(saveto, 'w') as f:
-                json.dump(self, f, default=obj2dict, indent=indent, **kwargs)
-                f.close()
-        else:
-           return obj2dict(self)
-
-
-class MetaData(JSONSerializable):
-    """
-    Meta data class for imaging and spectroscopic data
-    """
-    def __init__(self, datafile=None, **kwargs):
-        super().__init__(**kwargs)
-        if datafile is not None:
-            self.collect(datafile, **kwargs)
-
-    def collect(self, datafile):
-        """
-        Collect meta data from data file
-        """
-        self.path = path.dirname(datafile)
-        self.name = path.basename(datafile)
+    def show(self, ds9=None, frame=None):
+        if ds9 is None:
+            ds9 = self.ds9
+        if ds9 is None:
+            raise ValueError('DS9 window is not specificed')
+        ds9 = getds9(ds9)
+        if frame is None:
+            frame = self.frame
+        if frame is None:
+            frame = ds9.get('frame')
+        ds9.set('frame '+frame)
+        par = []
+        for k in self.parname:
+            par.append(self.__dict__[k])
+            if self.zerobased:
+                if k in ['x','y']:
+                    par[-1] += 1
+        propstr = ''
+        for k in list(self.specs.keys()):
+            propstr = propstr+' '+k+'='+str(self.specs[k])
+        propstr = '#'+propstr
+        ds9.set('regions', 'image; '+self.shape+' '+' '.join(str(par)[1:-1].split(','))+propstr)
 
 
-class MetaDataList(list):
-    """List of image meta data
-    """
-    def __init__(self, cls, **kwargs):
-        """
-        cls : name of `MetaData` or its subclass
-        """
-        super().__init__(**kwargs)
-        self.member_class = cls
-
-    def collect(self, datafiles, **kwargs):
-        pars = []
-        for i in range(len(datafiles)):
-            p = {}
-            if len(kwargs) > 0:
-                for k in kwargs.keys():
-                    p[k] = kwargs[k][i]
-            pars.append(p)
-        for f, p in zip(datafiles, pars):
-            meta = self.member_class()
-            meta.collect(f, **p)
-            self.append(meta)
-
-    def to_json(self, saveto=None, **kwargs):
-        """Dump meta data collection to a JSON string or file
-        """
-        indent = kwargs.pop('indent', 4)
-        out = [obj2dict(m) for m in self]
-        if saveto is not None:
-            with open(saveto, 'w') as f:
-                json.dump(out, f, indent=indent, **kwargs)
-                f.close()
-        else:
-            return json.dumps(out, indent=indent, **kwargs)
-
-    def to_table(self, saveto=None, overwrite=False):
-        """Return meta data as an astropy Table class object
-        """
-        if len(self) == 0:
-            return None
-        nn = len(self)
-        out = {}
-        for k in obj2dict(self[0]).keys():
-            out[k] = [getattr(m, k) for m in self]
-        out = table.Table(out)
-        if saveto is not None:
-            out.write(saveto, overwrite=overwrite)
-        else:
-            return out
+class CircularRegion(Region):
+    '''DS9 circular region class'''
+    parname = ('x','y','r')
+    _shape = 'circle'
+    size = ('r', 'r')
 
 
-def centroid(im, center=None, error=None, mask=None, method=0, box=6, tol=0.01, maxiter=50, threshold=None, verbose=False):
-    '''Wrapper for photutils.centroiding functions
+class EllipseRegion(Region):
+    '''DS9 ellipse region class'''
+    parname = ('x','y','a','b','angle')
+    _shape = 'ellipse'
+    size = ('a','b')
 
-    Parameters
-    ----------
-    im : array-like, astropy.nddata.NDData or subclass
-      Input image
-    center : (y, x), optional
-      Preliminary center to start the search
-    error : array-like, optional
-      Error of the input image.  If `im` is NDData type, then `error` will
-      be extracted from NDData.uncertainty.  This keyword overrides the
-      uncertainty in NDData.
-    mask : array-like bool, optional
-      Mask of input image.  If `im` is NDData type, then `mask` will be
-      extracted from NDData.mask.  This keyword overrides the mask in NDData.
-    method : int or str, optional
-      Method of centroiding:
-      [0, '2dg', 'gaussian'] - 2-D Gaussian
-      [1, 'com'] - Center of mass
-      [2, 'geom', 'geometric'] - Geometric center
-    box : int, optional
-      Box size for the search
-    tol : float, optional
-      The tolerance in pixels of the center.  Program exits iteration when
-      new center differs from the previous iteration less than `tol` or number
-      of iteration reaches `maxiter`.
-    maxiter : int, optional
-      The maximum number of iterations in the search
-    threshold : number, optional
-      Threshold, only used for method=2
-    verbose : bool, optional
-      Print out information
 
-    Returns
-    -------
-    (y, x) as a numpy array
+class BoxRegion(Region):
+    '''DS9 box region class'''
+    parname = ('x', 'y', 'a', 'b', 'angle')
+    _shape = 'box'
+    size = ('a','b')
 
-    This program uses photutils.centroids.centroid_2dg() or .centroid_com()
 
-    v1.0.0 : JYL @PSI, Feb 19, 2015
-    '''
-    from photutils.centroids import centroid_2dg, centroid_com
-    if isinstance(im, nddata.NDData):
-        if error is None:
-            if im.uncertainty is not None:
-                error = im.uncertainty.array
-        if mask is None:
-            if im.mask is not None:
-                mask = im.mask
-        im = im.data
-
-    if center is None:
-        center = np.asarray(im.shape)/2.
-    else:
-        center = np.asarray(center)
-    b2 = box/2
-    if (method in [2, 'geom', 'geometric']) and (threshold is None):
-        raise ValueError('threshold is not specified')
-    if verbose:
-        print(('Image provided as a '+str(type(im))+', shape = ', im.shape))
-        print(('Centroiding image in {0}x{0} box around ({1},{2})'.format(box,center[0],center[1])))
-        print(('Error array '+condition(error is None, 'not ', ' ')+'provided'))
-        print(('Mask array '+condition(mask is None, 'not ', ' ')+'provided'))
-    i = 0
-    delta_center = np.array([1e5,1e5])
-    while (i < maxiter) and (delta_center.max() > tol):
-        if verbose:
-            print(('  iteration {0}, center = ({1},{2})'.format(i, center[0], center[1])))
-        p1, p2 = np.floor(center-b2).astype('int'), np.ceil(center+b2).astype('int')
-        subim = np.asarray(im[p1[0]:p2[0],p1[1]:p2[1]])
-        if error is None:
-            suberr = None
-        else:
-            suberr = np.asarray(error[p1[0]:p2[0],p1[1]:p2[1]])
-        if mask is None:
-            submask = None
-        else:
-            submask = np.asarray(mask[p1[0]:p2[0],p1[1]:p2[1]])
-        if method in [0, '2dg', 'gaussian']:
-            xc, yc = centroid_2dg(subim, error=suberr, mask=submask)
-        elif method in [1, 'com']:
-            xc, yc = centroid_com(subim, mask=submask)
-        elif method in [2, 'geom', 'geometric']:
-            xc, yc = geometric_center(subim, threshold, mask=submask)
-        else:
-            raise ValueError("unrecognized `method` {0} received.  Should be [0, '2dg', 'gaussian'] or [1, 'com']".format(method))
-        center1 = np.asarray([yc+p1[0], xc+p1[1]])
-        delta_center = abs(center1-center)
-        center = center1
-        i += 1
-
-    if verbose:
-        print(('centroid = ({0},{1})'.format(center[0],center[1])))
-    return center
-
+class AnnulusRegion(Region):
+    '''DS9 annulus region class'''
+    parname = ('x', 'y', 'r_in', 'r_out')
+    _shape = 'annulus'
+    size = ('r_out', 'r_out')
 
 
 import pyds9

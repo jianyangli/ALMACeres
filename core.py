@@ -8,6 +8,8 @@ from astropy import units, table, constants, time
 from astropy.io import fits
 import spiceypy as spice
 from . import utils
+from . import saoimage
+from . import vector
 
 
 # Ceres constants
@@ -215,23 +217,27 @@ def brightness_temperature(flux, freq, dist):
 
 
 def imdisp(filename, ds9=None, **kwargs):
-    if ds9 is None:
-        ds9=saoimage.getds9()
-    im,hdr = readfits(filename,verbose=False,header=True)
-    im = np.squeeze(im)
-    bmaj = abs(hdr['BMAJ']/(2*hdr['CDELT1']))
-    bmin = abs(hdr['BMIN']/(2*hdr['CDELT1']))
-    bpa = hdr['BPA']+90
-    yc,xc = centroid(im, method=1, box=200)
-    beam = saoimage.EllipseRegion(xc+70,yc-50,bmaj,bmin,bpa)
-    width = kwargs.pop('width',None)
-    if width is not None:
-        beam.specs['width'] = width
-    color = kwargs.pop('color',None)
-    if color is not None:
-        beam.specs['color'] = color
-    ds9.imdisp(filename)
-    beam.show(ds9)
+    if utils.is_iterable(filename):
+        for f in filename:
+            imdisp(f, ds9=ds9, **kwargs)
+    else:
+        if ds9 is None:
+            ds9=saoimage.getds9()
+        im,hdr = utils.readfits(filename,verbose=False,header=True)
+        im = np.squeeze(im)
+        bmaj = abs(hdr['BMAJ']/(2*hdr['CDELT1']))
+        bmin = abs(hdr['BMIN']/(2*hdr['CDELT1']))
+        bpa = hdr['BPA']+90
+        yc,xc = utils.centroid(im, method=1, box=200)
+        beam = saoimage.EllipseRegion(xc+70,yc-50,bmaj,bmin,bpa)
+        width = kwargs.pop('width',None)
+        if width is not None:
+            beam.specs['width'] = width
+        color = kwargs.pop('color',None)
+        if color is not None:
+            beam.specs['color'] = color
+        ds9.imdisp(filename)
+        beam.show(ds9)
 
 
 def project(metadata, rc=(Ceres.ra.value, Ceres.rb.value, Ceres.rc.value), saveto=None):
@@ -245,9 +251,9 @@ def project(metadata, rc=(Ceres.ra.value, Ceres.rb.value, Ceres.rc.value), savet
 
     # project to (lon, lat)
     lat,lon = utils.makenxy(-90,90,91,0,358,180)
-    vpt = utils.Vector(1., metadata.SOLon, metadata.SOLat, type='geo', deg=True)
+    vpt = vector.Vector(1., metadata.SOLon, metadata.SOLat, type='geo', deg=True)
     pxlscl = metadata.Range*1.496e8*abs(metadata.xscl)/206265000.   # in km
-    x,y = utils.lonlat2xy(lon, lat, rc, vpt, pa=metadata.PolePA, center=(metadata.yc,metadata.xc), pxlscl=pxlscl)
+    x,y = vector.lonlat2xy(lon, lat, rc, vpt, pa=metadata.PolePA, center=(metadata.yc,metadata.xc), pxlscl=pxlscl)
     w = np.isfinite(x) & np.isfinite(y)
     b = np.zeros_like(x)
     b[w] = im[np.round(y[w]).astype(int),np.round(x[w]).astype(int)]
@@ -256,7 +262,7 @@ def project(metadata, rc=(Ceres.ra.value, Ceres.rb.value, Ceres.rc.value), savet
     lst = ((lon-metadata.SSLon)/15+12) % 24
 
     # calculate emission angle
-    emi = utils.Vector(np.ones_like(lon),lon,lat,type='geo',deg=True).vsep(utils.Vector(1,metadata.SOLon,metadata.SOLat,type='geo',deg=True))
+    emi = vector.Vector(np.ones_like(lon),lon,lat,type='geo',deg=True).vsep(vector.Vector(1,metadata.SOLon,metadata.SOLat,type='geo',deg=True))
 
     # save projection
     if saveto is not None:
@@ -265,7 +271,6 @@ def project(metadata, rc=(Ceres.ra.value, Ceres.rb.value, Ceres.rc.value), savet
         utils.writefits(saveto, emi, name='EMI', append=True)
 
     return b, lst, emi
-
 
 
 class snell(object):
