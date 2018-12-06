@@ -132,16 +132,16 @@ def background(filenames, edge=100, box=200, outfile=None):
     fnames = []
     for f in filenames:
         fnames.append(path.basename(f))
-        im = np.squeeze(readfits(f, verbose=False))
+        im = np.squeeze(utils.readfits(f, verbose=False))
         sz = im.shape
-        b1 = resmean(im[edge:edge+box,edge:edge+box])
-        b2 = resmean(im[edge:edge+box,sz[1]-edge-box:sz[1]-edge])
-        b3 = resmean(im[sz[0]-edge-box:sz[0]-edge:,edge:edge+box])
-        b4 = resmean(im[sz[0]-edge-box:sz[0]-edge,sz[1]-edge-box:sz[1]-edge])
+        b1 = utils.resmean(im[edge:edge+box,edge:edge+box])
+        b2 = utils.resmean(im[edge:edge+box,sz[1]-edge-box:sz[1]-edge])
+        b3 = utils.resmean(im[sz[0]-edge-box:sz[0]-edge:,edge:edge+box])
+        b4 = utils.resmean(im[sz[0]-edge-box:sz[0]-edge,sz[1]-edge-box:sz[1]-edge])
         bg = (b1+b2+b3+b4)/4.
         bgs.append([bg,b1,b2,b3,b4])
         #print('{0}: {1}'.format(fnames[-1],np.array2string(np.array(bgs[-1]),precision=3)))
-        with printoptions(precision=2):
+        with utils.printoptions(precision=2):
             print('{0}: {1}'.format(fnames[-1], np.array(bgs[-1])))
     bgs = np.array(bgs).T
     if outfile is not None:
@@ -165,7 +165,7 @@ def photometry(filenames, centers, rapt=100, outfile=None):
     '''
     import photutils as phot
     nfs = len(filenames)
-    if not is_iterable(rapt):
+    if not utils.is_iterable(rapt):
         rapt = np.repeat(rapt,nfs)
     flux = []
     bms = []
@@ -173,13 +173,13 @@ def photometry(filenames, centers, rapt=100, outfile=None):
     for f,c,r in zip(filenames,centers,rapt):
         fname.append(path.basename(f))
         print(fname[-1])
-        im,hdr = readfits(f,verbose=False,header=True)
+        im,hdr = utils.readfits(f,verbose=False,header=True)
         im = np.squeeze(im)
         sz = im.shape
         bm = np.pi*hdr['BMAJ']*hdr['BMIN']*3600**2/4  # beam area in arcsec**2
         bms.append(bm)
         apt = phot.CircularAperture(c,r)
-        ftot = apphot(im, apt)['aperture_sum'][0]
+        ftot = utils.apphot(im, apt)['aperture_sum'][0]
         ftot *= (hdr['cdelt1']*3600)**2/bm
         flux.append(ftot)
 

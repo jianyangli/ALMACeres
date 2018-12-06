@@ -188,6 +188,152 @@ def makenxy(y1, y2, ny, x1, x2, nx, rot=None):
     return np.array((y, x))
 
 
+def resmean(x, threshold=3., std=False):
+    '''Calculate resistant mean.
+
+ Parameters
+ ----------
+ x : array-like, numbers
+ cut : float, optional
+   Threshold for resistant mean
+ std : bool, optional
+   If set True, then a tuple of (mean, std_dev) will be returned
+
+ Returns
+ -------
+ float, or tuple of two float
+
+ v1.0.0 : JYL @PSI, Oct 24, 2013
+    '''
+
+    x1 = np.asarray(x).flatten()
+
+    while True:
+        m, s = x1.mean(), x1.std()
+        ww = (x1 <= m+threshold*s) & (x1 >= m-threshold*s)
+        x1 = x1[ww]
+        if np.abs(x1.std()-s) < 1e-13:
+            break
+
+    if std:
+        return x1.mean(), x1.std()
+    else:
+        return x1.mean()
+
+
+import contextlib
+@contextlib.contextmanager
+def printoptions(*args, **kwargs):
+    original = np.get_printoptions()
+    np.set_printoptions(*args, **kwargs)
+    try:
+        yield
+    finally:
+        np.set_printoptions(**original)
+
+
+def is_iterable(v):
+    """Check whether a variable is iterable"""
+    if isinstance(v, (str, bytes)):
+        return False
+    elif hasattr(v, '__iter__'):
+        return True
+    else:
+        return False
+
+
+def aperture_photometry(data, apertures, **kwargs):
+    '''Wrapper for photutils.aperture_photometry
+
+    Fixes a bug in the original program (see below).
+    Returns the extended Table class.
+
+    ...bug description:
+    The original program that puts the `xcenter` and `ycenter` in a
+    shape (1,1) array when input aperture contains only one position.
+
+    v1.0.0 : JYL @PSI, Feb 2015'''
+
+    from photutils import aperture_photometry
+    ap = table.Table(aperture_photometry(data, apertures, **kwargs))
+    if apertures.positions.shape[0] == 1:
+        xc = ap['xcenter'].data[0]
+        yc = ap['ycenter'].data[0]
+        ap.remove_column('xcenter')
+        ap.remove_column('ycenter')
+        ap.add_column(table.Column([xc],name='xcenter'))
+        ap.add_column(table.Column([yc],name='ycenter'))
+    if ap['xcenter'].unit is None:
+        ap['xcenter'].unit = units.pix
+    if ap['ycenter'].unit is None:
+        ap['ycenter'].unit = units.pix
+    return ap
+
+
+def apphot(im=None, aperture=None, ds9=None, radius=3, newwindow=False, **kwargs):
+    '''Measure aperture photometry
+
+    If no image is given, then the image will be extracted from the
+    active frame in a DS9 window specified by `ds9.`
+
+    If no DS9 window is specified, then the first-openned DS9 window
+    will be used.
+
+    If no aperture is given, then the aperture(s) will be extracted
+    from the circular and annulus regions in the DS9 window.  If no
+    regions is defined, then the aperture center will be specified
+    interactively by mouse click in DS9, and the radius of apertures
+    will be specified by keyword `radius`.
+
+    Photometry will be returned in a Table.
+
+    v1.0.0 : JYL @PSI, Feb 2015
+    v1.0.1 : JYL @PSI, Jan 18, 2017
+      Bug fix
+    '''
+    if im is None and ds9 is None:
+        raise ValueError('either `im` or `ds9` must be specified')
+
+    if im is None:  # Get image from a ds9 window
+        im = getds9(ds9).get_arr2np()
+
+    if aperture is None:  # If no aperture specified, then get it from DS9
+        ds9 = getds9(ds9, newwindow)
+        ds9.imdisp(im)
+        aperture = ds9.aperture()
+        if not aperture:
+            centroid = kwargs.pop('centroid', False)
+            aperture = ds9.define_aperture(radius=radius, centroid=centroid)
+    if aperture == []:  # If still not specified, do nothing
+        return None
+
+    # Measure photometry
+    pho, r, r1 = [], [], []
+    if not isinstance(aperture,list):
+        aperture = [aperture]
+    for apt in aperture:
+        napt = apt.positions.shape[0]
+        if hasattr(im,'uncertainty'):
+            error = im.uncertainty.array
+        else:
+            error = None
+        error = kwargs.pop('error', error)
+        pho.append(aperture_photometry(im, apt, error=error, **kwargs))
+        if napt == 1:
+            r.append(getattr(apt, 'r', getattr(apt, 'r_in', None)))
+            r1.append(getattr(apt, 'r_out', None))
+        else:
+            r = r+[getattr(apt, 'r', getattr(apt, 'r_in', None))]*napt
+            r1 = r1+[getattr(apt, 'r_out', None)]*napt
+    if pho == []:
+        return None
+    pho = table.Table(table.vstack(pho))
+    pho.add_column(table.Column(r, name='r', unit='pix'))
+    if len(np.nonzero(r1)[0]) > 0:
+        pho.add_column(table.Column(r1, name='r_out', unit='pix'))
+    return pho
+
+
 def subcoord(time, target, observer='earth', bodyframe=None, saveto=None, planetographic=False):
     '''
  Calculate the sub-observer and sub-solar points.
