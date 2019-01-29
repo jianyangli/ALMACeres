@@ -273,28 +273,75 @@ def project(metadata, rc=(Ceres.ra.value, Ceres.rb.value, Ceres.rc.value), savet
     return b, lst, emi
 
 
-class snell(object):
+class Snell(object):
+    """
+    Implementation of Snell's law of reflection.  In this model, radiation is
+    transmitted from the first media to the second media.  This model
+    calculates the angles of refraction.
+    """
 
-    def __init__(self, n1, n2=1., deg=True):
+    def __init__(self, n1, n2=1.):
+        """
+        n1: number, refractive index of the first media
+        n2: optional, number, refractive index of the second media
+        """
         self.n1 = n1
         self.n2 = n2
-        self.deg = True
+
+
+    @staticmethod
+    def refraction_angles(angle, n1, n2):
+        """
+        Calculates the refractive angle in the second media from that in the
+        first media.
+
+        angle: number, astropy Quantity, or array-like number or Quantity,
+            the angle(s) in the second media.  If not Quantity, then in
+            degrees by default.
+        n1: number, refractive index of the first (incident) media
+        n2: number, refractive index of the second (emission) media
+        """
+        sinangle = n1/n2 * np.sin(np.deg2rad(angle))
+        if sinangle > 1:
+            return np.nan
+        a = np.arcsin(sinangle)
+        if not isinstance(angle, units.quantity.Quantity):
+            a = np.rad2deg(a)
+        return a
+
 
     def angle1(self, angle2):
-        if self.deg:
-            angle2 = np.deg2rad(angle2)
-        a1 = np.arcsin(self.n2/self.n1 * np.sin(angle2))
-        if self.deg:
-            a1 = np.rad2deg(a1)
-        return a1
+        """
+        Calculates the refractive angle in the second media from that in the
+        first media.
+
+        angle2: number, astropy Quantity, or array-like number or Quantity,
+            the angle(s) in the second media.  If not Quantity, then in
+            degrees by default.
+        """
+        return Snell.refraction_angles(angle2, self.n2, self.n1)
+
 
     def angle2(self, angle1):
-        if self.deg:
-            angle1 = np.deg2rad(angle1)
-        a2 = np.arcsin(self.n1/self.n2*np.sin(angle1))
-        if self.deg:
-            a2 = np.rad2deg(a2)
-        return a2
+        """
+        Calculates the refractive angle in the second media from that in the
+        first media.
+
+        angle2: number, astropy Quantity, or array-like number or Quantity,
+            the angle(s) in the second media.  If not Quantity, then in
+            degrees by default.
+        """
+        return Snell.refraction_angles(angle1, self.n1, self.n2)
+
+
+    @property
+    def critical_angle(self):
+        """Critial angle of reflection"""
+        n1 = self.n1
+        n2 = self.n2
+        if n1 > n2:
+            n1, n2 = n2, n1
+        return np.rad2deg(np.arcsin(n1/n2))
 
 
 # absorption length
@@ -303,62 +350,132 @@ absorption_length = lambda n, loss_tangent, wavelength=1.: wavelength/(4*np.pi*n
 # absorption length
 absorption_coefficient = lambda n, loss_tangent, wavelength=1.: 1./absorption_length(n, loss_tangent, wavelength)
 
+# loss tangent
+loss_tangent = lambda n, abs_len, wavelength: ((2*(wavelength/(4*np.pi*n*abs_len))**2+1)**2-1)**0.5
 
-class SubSurface(object):
-    """SubSurface class to simulate the subsurface thermal behavior
 
-    Based on
+class Layer(object):
+    """Layer class for calculating propagation of subsurface thermal emission
+
+    Based on the models in Keihm & Langseth (1975), Icarus 24, 211-230
     """
 
-    def __init__(self, T, n, loss_tangent=None, absorption_length=None, wavelength=1., emissivity=1.):
+    def __init__(self, n, loss_tangent, depth=np.inf, emissivity=1., profile=None):
         """
-        T: temperature profile where a call to `T(z)` returns the temperature
-            at depth `z`
-        n: refractive index
-        loss_tangent: optional, loss tengent
-        absorption_length: optional, absorption length
-        wavelength: optional, the wavelength of calculation, in the same unit
-            as depth scale `z` and loss tangent.
-        emissivity: optional, emissivity
+        n: number, refractive index of this layer
+        loss_tangent: number, loss tengent
+        depth: optional, number, depth of the layer in the same unit as `z`
+            (see below for the description of `profile`)
+        emissivity: optional, number, emissivity
+        profile: optional, callable object, where `profile(z)` returns the
+            physical quantity of the layer at depth `z`.  Most commonly it is a
+            temperature profile, or a thermal emission profile, etc.
         """
-        self.T = T
         self.n = n
+        self.depth = depth
+        self.loss_tangent = loss_tangent
         self.emissivity = emissivity
-        self.loss_tangent = loss_tangent  # loss tangent
-        if absorption_length is not None:
-            # set loss tangent through absorption length and override loss_tangent parameter
-            self.loss_tangent = ((2*(wavelength/(4*np.pi*self.n*absorption_length))**2+1)**2-1)**0.5
-        if self.loss_tangent is None:
-            raise ValueError('either `loss_tangent` or `absorption_length` has to be specified')
+        self.profile = profile
 
-    def Tb(self, emi, wavelength, epsrel=1e-4):
-        """Returns the brightness temperature with subsurface emission
-        accounted for
 
-        emi: emission angle in degrees
-        wavelength: wavelength to calculate
+    def absorption_length(self, wavelength=1.):
+        """
+        Calculates absorption length
+
+        n: number, refractive index
+        loss_tangent: number, loss tangent
+        wavelength: optional, number or astropy Quantity or array_like number
+            or Quantity, wavelength of observations
+        """
+        return 1./self.absorption_coefficient(wavelength=wavelength)
+
+
+    def absorption_coefficient(self, wavelength=1.):
+        """
+        Calculates absorption coefficient
+
+        n: number, refractive index
+        loss_tangent: number, loss tangent
+        wavelength: optional, number or astropy Quantity or array_like number
+            or Quantity, wavelength of observations
+        """
+        return (4*np.pi*self.n)/wavelength*np.power(0.5*(np.power(1+self.loss_tangent*self.loss_tangent,0.5)-1),0.5)
+
+
+class Surface(object):
+    """
+    Surface class that contain subsurface layers and calculates the observables
+    from the surface, such as brightness temperature or thermal emission, etc.
+
+    Based on the models in Keihm & Langseth (1975), Icarus 24, 211-230
+    """
+
+    def __init__(self, layers):
+        """
+        layers: SubsurfaceLayer class object or array_like of it, the
+            subsurface layers.  If array-like, then the layers are ordered
+            from the top surface downward.
+        """
+        if not hasattr(layers, '__iter__'):
+            self.layers = [layers]
+        else:
+            self.layers = layers
+        self.depth = 0
+        for i,l in enumerate(self.layers[:-1]):
+            if l.depth == np.inf:
+                raise ValueError(f'only the deepest layer can have infinite depth.  the depth of the {i}th layer cannot be infinity')
+            self.depth += l.depth
+        self.depth += self.layers[-1].depth
+        self.n_layers = len(self.layers)
+
+
+    def emission(self, emi_ang, wavelength, epsrel=1e-4, debug=False):
+        """Calculates the quantity at the surface with subsurface emission
+        propagated and accounted for.
+
+        emi_ang: number or astropy Quantity, emission angle.  If not Quantity,
+            then angle is in degrees
+        wavelength: wavelength to calculate, same unit as the length quantities
+            in `Surface.layers` class objects
         epsrel: optional, relative error to tolerance in numerical
             integration.  See `scipy.integrate.quad`.
         """
-        if hasattr(emi,'__iter__'):
-            emi = np.asanyarray(emi)
-            results = np.zeros_like(emi).flatten()
-            emi_flat = emi.flatten()
-            for i in range(len(results)):
-                results[i] = self.Tb(emi_flat[i], wavelength=wavelength, epsrel=epsrel)
-            return results.reshape(emi.shape)
+        if hasattr(emi_ang,'__iter__'):
+            raise ValueError('`emi_ang` has to be a scaler')
 
-        s = snell(n)
-        inc = s.angle1(emi)
-        coef = 1/self.absorption_length(wavelength)   # absorption coefficient
-        sec_i = 1./np.cos(np.deg2rad(inc))
-        intfunc = lambda z: self.T(z) * np.exp(-coef*sec_i*z)
-        from scipy.integrate import quad
-        integral = quad(intfunc, 0, np.inf, epsrel=epsrel)[0]
-        return self.emissivity*sec_i*coef * integral
+        for i,l in enumerate(self.layers):
+            if l.profile is None:
+                raise ValueError(f'the {i}th layer does not have a quantity profile defined')
+            if not hasattr(l.profile, '__call__'):
+                raise ValueError(f'the {i}th layer does not have a valid quantity profile defined')
 
-    def absorption_length(self, wavelength=1.):
-        '''Electrical skin depth, or absorption length
-        If wavelength is not specified, then it returns Le in unit of wavelength'''
-        return absorption_length(self.n, self.loss_tangent, wavelength)
+        L = 0
+        n0 = 1.
+        intprofile = []
+        zzz = []
+        m = 0.
+        for i,l in enumerate(self.layers):
+            # integrate in layer `l`
+            #print(f'calculating {i}th layer: ')
+            inc = Snell(l.n, n0).angle1(emi_ang)
+            coef = l.absorption_coefficient(wavelength)
+            cos_i = np.cos(np.deg2rad(inc))
+            intfunc = lambda z: l.profile(z) * np.exp(-coef*z/cos_i+L)
+            if l.depth == np.inf:
+                zz = np.linspace(0,1000,100)
+            else:
+                zz = np.linspace(0,l.depth,100)
+            intprofile.append(intfunc(zz))
+            zzz.append(zz+L)
+            from scipy.integrate import quad
+            integral = quad(intfunc, 0, l.depth, epsrel=epsrel)[0]
+            m += l.emissivity*coef*integral/cos_i
+            # prepare for the next layer
+            L += l.depth/cos_i*coef
+            emi_ang = np.arccos(cos_i)
+            n0 = l.n
 
+        if debug:
+            return m, intprofile, zzz
+        else:
+            return m
