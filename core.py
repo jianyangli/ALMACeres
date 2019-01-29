@@ -304,11 +304,25 @@ absorption_length = lambda n, loss_tangent, wavelength=1.: wavelength/(4*np.pi*n
 absorption_coefficient = lambda n, loss_tangent, wavelength=1.: 1./absorption_length(n, loss_tangent, wavelength)
 
 
-class surface(object):
+class SubSurface(object):
+    """SubSurface class to simulate the subsurface thermal behavior
+
+    Based on
+    """
 
     def __init__(self, T, n, loss_tangent=None, absorption_length=None, wavelength=1., emissivity=1.):
-        self.T = T  # temperature profile where T(z) is the temperature at z
-        self.n = n  # refractive index
+        """
+        T: temperature profile where a call to `T(z)` returns the temperature
+            at depth `z`
+        n: refractive index
+        loss_tangent: optional, loss tengent
+        absorption_length: optional, absorption length
+        wavelength: optional, the wavelength of calculation, in the same unit
+            as depth scale `z` and loss tangent.
+        emissivity: optional, emissivity
+        """
+        self.T = T
+        self.n = n
         self.emissivity = emissivity
         self.loss_tangent = loss_tangent  # loss tangent
         if absorption_length is not None:
@@ -318,8 +332,14 @@ class surface(object):
             raise ValueError('either `loss_tangent` or `absorption_length` has to be specified')
 
     def Tb(self, emi, wavelength, epsrel=1e-4):
-        '''Calculate brightness temperature with subsurface emission
-        accounted for'''
+        """Returns the brightness temperature with subsurface emission
+        accounted for
+
+        emi: emission angle in degrees
+        wavelength: wavelength to calculate
+        epsrel: optional, relative error to tolerance in numerical
+            integration.  See `scipy.integrate.quad`.
+        """
         if hasattr(emi,'__iter__'):
             emi = np.asanyarray(emi)
             results = np.zeros_like(emi).flatten()
