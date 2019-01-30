@@ -421,12 +421,23 @@ class Surface(object):
         else:
             self.layers = layers
         self.depth = 0
+        self._check_layer_depth()
+        self.depth = np.sum([l.depth for l in self.layers])
+        self.n_layers = len(self.layers)
+
+
+    def _check_layer_depth(self):
         for i,l in enumerate(self.layers[:-1]):
             if l.depth == np.inf:
                 raise ValueError(f'only the deepest layer can have infinite depth.  the depth of the {i}th layer cannot be infinity')
-            self.depth += l.depth
-        self.depth += self.layers[-1].depth
-        self.n_layers = len(self.layers)
+
+
+    def _check_layer_profile(self):
+        for i,l in enumerate(self.layers):
+            if l.profile is None:
+                raise ValueError(f'the {i}th layer does not have a quantity profile defined')
+            if not hasattr(l.profile, '__call__'):
+                raise ValueError(f'the {i}th layer does not have a valid quantity profile defined')
 
 
     def emission(self, emi_ang, wavelength, epsrel=1e-4, debug=False):
@@ -442,17 +453,13 @@ class Surface(object):
         """
         if hasattr(emi_ang,'__iter__'):
             raise ValueError('`emi_ang` has to be a scaler')
-
-        for i,l in enumerate(self.layers):
-            if l.profile is None:
-                raise ValueError(f'the {i}th layer does not have a quantity profile defined')
-            if not hasattr(l.profile, '__call__'):
-                raise ValueError(f'the {i}th layer does not have a valid quantity profile defined')
+        self._check_layer_depth()
+        self._check_layer_profile()
 
         L = 0
         n0 = 1.
-        intprofile = []
-        zzz = []
+        D = 0
+        prof = {'t': [], 'intprofile': [], 'zzz': [], 'L0': []}
         m = 0.
         for i,l in enumerate(self.layers):
             # integrate in layer `l`
@@ -460,22 +467,27 @@ class Surface(object):
             inc = Snell(l.n, n0).angle1(emi_ang)
             coef = l.absorption_coefficient(wavelength)
             cos_i = np.cos(np.deg2rad(inc))
-            intfunc = lambda z: l.profile(z) * np.exp(-coef*z/cos_i+L)
+            if debug:
+                print(f'cos(i) = {cos_i}, coef = {coef}')
+            intfunc = lambda z: l.profile(z) * np.exp(-coef*z/cos_i-L)
             if l.depth == np.inf:
                 zz = np.linspace(0,1000,100)
             else:
                 zz = np.linspace(0,l.depth,100)
-            intprofile.append(intfunc(zz))
-            zzz.append(zz+L)
+            prof['t'].append(l.profile(zz))
+            prof['intprofile'].append(intfunc(zz))
+            prof['zzz'].append(zz+D)
+            prof['L0'].append(L)
             from scipy.integrate import quad
             integral = quad(intfunc, 0, l.depth, epsrel=epsrel)[0]
             m += l.emissivity*coef*integral/cos_i
             # prepare for the next layer
+            D += l.depth
             L += l.depth/cos_i*coef
             emi_ang = np.arccos(cos_i)
             n0 = l.n
 
         if debug:
-            return m, intprofile, zzz
+            return m, prof
         else:
             return m
