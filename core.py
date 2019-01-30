@@ -195,7 +195,7 @@ class Beam():
 
     @property
     def area(self):
-        # beam area: pi * bmaj * bmin / (4 * log(2))
+        # returns a Quantity, beam area: pi * bmaj * bmin / (4 * log(2))
         return np.pi*self.major*self.minor/2.772589
 
 
@@ -297,7 +297,7 @@ def project(metadata, rc=(Ceres.ra.value, Ceres.rb.value, Ceres.rc.value), savet
     fname = path.join(metadata.path, metadata.name)
     im = utils.readfits(fname, verbose=False)
     im = np.squeeze(im)
-    im /= np.pi*metadata.bmaj*metadata.bmin*1e-6/4.  # in Jy/arcsec**2
+    im /= Beam(metadata.bmaj*units.mas,metadata.bmin*units.mas).area.to('arcsec2').value  # in Jy/arcsec**2
 
     # project to (lon, lat)
     lat,lon = utils.makenxy(-90,90,91,0,358,180)
