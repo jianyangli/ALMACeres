@@ -12,16 +12,33 @@ from . import saoimage
 from . import vector
 
 
+# define thermal inertia units
+tiu = units.def_unit('tiu', units.Unit('J/(m2 K s(0.5))'))
+units.add_enabled_units(tiu)
+
+
 # Ceres constants
 class Ceres(object):
+    """Basic properties of Ceres
+    """
     # body shape and pole based on DLR RC3 shape model
     ra = 482.64 * units.km
     rb = 480.60 * units.km
     rc = 445.57 * units.km
     r = np.sqrt((ra+rb)*rc/2)
-    pole = (291.41, 66.79)
+    from astropy.coordinates import SkyCoord
+    pole = SkyCoord(ra=291.41*units.deg, dec=66.79*units.deg)
     GM = 62.68 * units.Unit('km3/s2')
     M = (GM/constants.G).decompose()
+
+    # Thermal and scattering parameters, from Chamberlain et al. (2009)
+    rho = 1240. * units.Unit('kg/m3')  # surface material density, Mitchell et al. (1996)
+    Kr = 1.87**(rho.to('g/cm3').value)  # real dielectric component, formula from Ostro et al. 1999
+    n = np.sqrt(Kr)   # refractive index
+    loss_tangent = 10**(0.44*rho.to('g/cm3').value-2.943)   # loss tangent, formula from Ostro et al. 1999
+    emissivity = 0.9    # emissivity, typical value
+    I = 15.*tiu   # thermal inertia, Spencer 1990
+    c = 750.*units.J/units.K   # specific heat, typcial rock value
 
 
 class ALMACeresImageMetaData(utils.MetaData):
@@ -458,12 +475,12 @@ class Surface(object):
 
         L = 0
         n0 = 1.
-        D = 0
-        prof = {'t': [], 'intprofile': [], 'zzz': [], 'L0': []}
         m = 0.
+        if debug:
+            D = 0
+            prof = {'t': [], 'intprofile': [], 'zzz': [], 'L0': []}
         for i,l in enumerate(self.layers):
             # integrate in layer `l`
-            #print(f'calculating {i}th layer: ')
             inc = Snell(l.n, n0).angle1(emi_ang)
             coef = l.absorption_coefficient(wavelength)
             cos_i = np.cos(np.deg2rad(inc))
