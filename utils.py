@@ -646,6 +646,54 @@ class MetaDataList(list):
         else:
             return out
 
+    @classmethod
+    def from_json(cls, member_class, string=None, file=None, **kwargs):
+        """Initialize class object from JSON strong or file
+
+        member_class: class name of list members
+        string: optional, string, the JSON string to initialize members.
+            `string` parameter overrides `file` parameter
+        file: optional, string, the name of JSON file
+        """
+        if string is not None:
+            s = json.loads(string, **kwargs)
+        elif file is not None:
+            with open(file, 'r') as f:
+                s = json.load(f, **kwargs)
+                f.close()
+        else:
+            raise IOError('input string or file not supplied')
+        obj = cls(member_class)
+        for i in s:
+            member = member_class()
+            for k, v in i.items():
+                setattr(member, k, v)
+            obj.append(member)
+        return obj
+
+    @classmethod
+    def from_table(cls, member_class, table=None, file=None):
+        """Initialize object from astropy Table or table file
+
+        member_class: class name of list members
+        """
+        if table is not None:
+            if not isinstance(table, astropy.table.Table):
+                raise ValueError('input table is not an astropy Table class object')
+        elif file is not None:
+            from astropy.io import ascii
+            table = ascii.read(file)
+        else:
+            raise IOError('input table or file not supplied')
+        obj = cls(member_class)
+        keys = list(table.keys())
+        for row in table:
+            member = member_class()
+            for k in keys:
+                setattr(member, k, row[k])
+            obj.append(member)
+        return obj
+
 
 def centroid(im, center=None, error=None, mask=None, method=0, box=6, tol=0.01, maxiter=50, threshold=None, verbose=False):
     '''Wrapper for photutils.centroiding functions
