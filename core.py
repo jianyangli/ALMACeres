@@ -166,6 +166,27 @@ def background(filenames, edge=100, box=200, outfile=None):
     return bgs[0]
 
 
+class Beam():
+    def __init__(self, major, minor):
+        """
+        Define beam size
+
+        major, minor: number or astropy Quantity, major and minor axes.
+            Default unit arcsec if not Quantity
+        """
+        if not isinstance(major, units.quantity.Quantity):
+            major = major * units.arcsec
+        self.major = major
+        if not isinstance(minor, units.quantity.Quantity):
+            minor = minor * units.arcsec
+        self.minor = minor
+
+    @property
+    def area(self):
+        # beam area: pi * bmaj * bmin / (4 * log(2))
+        return np.pi*self.major*self.minor/2.772589
+
+
 def photometry(filenames, centers, rapt=100, outfile=None):
     '''Measure integrated photometry
 
@@ -193,7 +214,7 @@ def photometry(filenames, centers, rapt=100, outfile=None):
         im,hdr = utils.readfits(f,verbose=False,header=True)
         im = np.squeeze(im)
         sz = im.shape
-        bm = np.pi*hdr['BMAJ']*hdr['BMIN']*3600**2/4  # beam area in arcsec**2
+        bm = Beam(hdr['BMAJ']*units.deg,hdr['BMIN']*units.deg).area.to('arcsec2').value
         bms.append(bm)
         apt = phot.CircularAperture(c,r)
         ftot = utils.apphot(im, apt)['aperture_sum'][0]
