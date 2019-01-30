@@ -40,6 +40,18 @@ class Ceres(object):
     I = 15.*tiu   # thermal inertia, Spencer 1990
     c = 750.*units.J/units.K   # specific heat, typcial rock value
 
+    def xsection(self, dist):
+        if not isinstance(dist, units.Quantity):
+            dist = dist*units.au
+            q = False
+        else:
+            q = True
+        equiv = units.dimensionless_angles()
+        xsec = np.pi*((Ceres.ra+Ceres.rb)/(2*dist)).to('arcsec',equivalencies=equiv)*(Ceres.rc/dist).to('arcsec', equivalencies=equiv)
+        if not q:
+            xsec = xsec.to('arcsec2').value
+        return xsec
+
 
 class ALMACeresImageMetaData(utils.MetaData):
     """Meta data class for Ceres ALMA images
@@ -174,10 +186,10 @@ class Beam():
         major, minor: number or astropy Quantity, major and minor axes.
             Default unit arcsec if not Quantity
         """
-        if not isinstance(major, units.quantity.Quantity):
+        if not isinstance(major, units.Quantity):
             major = major * units.arcsec
         self.major = major
-        if not isinstance(minor, units.quantity.Quantity):
+        if not isinstance(minor, units.Quantity):
             minor = minor * units.arcsec
         self.minor = minor
 
@@ -249,7 +261,7 @@ def brightness_temperature(flux, freq, dist):
         freq = freq*units.Hz
     if not isinstance(dist, units.Quantity):
         dist = dist*units.au
-    area = np.pi*(Ceres.r/dist).to('arcsec',equivalencies=units.dimensionless_angles())**2
+    area = Ceres().xsection(dist)
     equiv = units.brightness_temperature(area, freq)
     return flux.to(units.K,equivalencies=equiv)
 
@@ -343,7 +355,7 @@ class Snell(object):
         if sinangle > 1:
             return np.nan
         a = np.arcsin(sinangle)
-        if not isinstance(angle, units.quantity.Quantity):
+        if not isinstance(angle, units.Quantity):
             a = np.rad2deg(a)
         return a
 
