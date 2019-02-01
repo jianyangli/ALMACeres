@@ -61,7 +61,7 @@ class ALMACeresImageMetaData(utils.MetaData):
         hdr = fits.open(datafile)[0].header
         self.bmaj = hdr['bmaj']*3600_000.
         self.bmin = hdr['bmin']*3600_000.
-        self.bpa = hdr['bpa']*3600_000.
+        self.bpa = hdr['bpa']
         self.xscl = hdr['cdelt1']*3600_000.
         self.yscl = hdr['cdelt2']*3600_000.
         for k, v in kwargs.items():
