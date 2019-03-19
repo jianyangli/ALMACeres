@@ -552,7 +552,8 @@ class JSONSerializable():
     def __repr__(self):
         return str(obj2dict(self))
 
-    def from_json(self, string=None, file=None, **kwargs):
+    @classmethod
+    def from_json(cls, string=None, file=None, **kwargs):
         """
         Load meta data from JSON string or file
         """
@@ -564,8 +565,10 @@ class JSONSerializable():
             with open(file, 'r') as f:
                 s = json.load(f, **kwargs)
                 f.close()
+        obj = cls()
         for k, v in s.items():
-            setattr(self, k, v)
+            setattr(obj, k, v)
+        return obj
 
     def to_json(self, saveto=None, **kwargs):
         """Dump meta data to a JSON string or file
