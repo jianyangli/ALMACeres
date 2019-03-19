@@ -524,15 +524,16 @@ class Surface(object):
                 zz = np.linspace(0,1000,100)
             else:
                 zz = np.linspace(0,l.depth,100)
-            prof['t'].append(l.profile(zz))
-            prof['intprofile'].append(intfunc(zz))
-            prof['zzz'].append(zz+D)
-            prof['L0'].append(L)
+            if debug:
+                prof['t'].append(l.profile(zz))
+                prof['intprofile'].append(intfunc(zz))
+                prof['zzz'].append(zz+D)
+                prof['L0'].append(L)
+                D += l.depth
             from scipy.integrate import quad
             integral = quad(intfunc, 0, l.depth, epsrel=epsrel)[0]
             m += l.emissivity*coef*integral/cos_i
             # prepare for the next layer
-            D += l.depth
             L += l.depth/cos_i*coef
             emi_ang = np.arccos(cos_i)
             n0 = l.n
