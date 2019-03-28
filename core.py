@@ -20,28 +20,65 @@ tiu = u.def_unit('tiu', u.Unit('J/(m2 K s(0.5))'))
 u.add_enabled_units(tiu)
 
 
+class TriaxialShape(object):
+
+    @u.quantity_input
+    def __init__(self, ra: u.km, rb: u.km, rc: u.km):
+        self.ra = ra
+        self.rb = rb
+        self.rc = rc
+        self.r_volume_equivalent = (ra*rb*rc)**(1/3)
+        self.r_area_equivalent = np.sqrt((ra+rb)*rc/2)
+
+    @property
+    def surface_area(self):
+        p = 1.6075
+        ap = self.ra**p
+        bp = self.rb**p
+        cp = self.rc**p
+        return 4*np.pi*((ap*bp+ap*cp+bp*cp)/3)**(1/p)
+
+    @property
+    def volume(self):
+        return 4/3*np.pi*self.ra*self.rb*self.rc
+
+
+class Body(object):
+    pass
+
 # Ceres constants
-class Ceres(object):
+class Ceres(Body):
     """Basic properties of Ceres
     """
-    # body shape and pole based on DLR RC3 shape model
-    ra = 482.64 * u.km
-    rb = 480.60 * u.km
-    rc = 445.57 * u.km
-    r = np.sqrt((ra+rb)*rc/2)
-    from astropy.coordinates import SkyCoord
-    pole = SkyCoord(ra=291.41*u.deg, dec=66.79*u.deg)
-    GM = 62.68 * u.Unit('km3/s2')
-    M = (GM/const.G).decompose()
 
-    # Thermal and scattering parameters, from Chamberlain et al. (2009)
-    density = 1240. * u.Unit('kg/m3')  # surface material density, Mitchell et al. (1996)
-    Kr = 1.87**(density.to('g/cm3').value)  # real dielectric component, formula from Ostro et al. 1999
-    n = np.sqrt(Kr)   # refractive index
-    loss_tangent = 10**(0.44*density.to('g/cm3').value-2.943)   # loss tangent, formula from Ostro et al. 1999
-    emissivity = 0.9    # emissivity, typical value
-    thermal_inertia = 15.*tiu   # thermal inertia, Spencer 1990
-    specific_heat = 750.*u.J/(u.K*u.kg)   # specific heat, typcial rock value
+    def __init__(self):
+        # body shape and pole based on DLR RC3 shape model
+        self.shape = TriaxialShape(482.64*u.km, 480.64*u.km, 445.57*u.km)
+        from astropy.coordinates import SkyCoord
+        self.pole = SkyCoord(ra=291.41*u.deg, dec=66.79*u.deg)
+        self.GM = 62.68 * u.Unit('km3/s2')
+
+        # Thermal and scattering parameters, from Chamberlain et al. (2009)
+        self.surface_density = 1240. * u.Unit('kg/m3')  # surface material density, Mitchell et al. (1996)
+        self.Kr = 1.87**(self.surface_density.to('g/cm3').value)  # real dielectric component, formula from Ostro et al. 1999
+        self.loss_tangent = 10**(0.44*self.surface_density.to('g/cm3').value-2.943)   # loss tangent, formula from Ostro et al. 1999
+        self.emissivity = 0.9    # emissivity, typical value
+        self.thermal_inertia = 15.*tiu   # thermal inertia, Spencer 1990
+        self.specific_heat = 750.*u.J/(u.K*u.kg)   # specific heat, typcial rock value
+        self.rotational_period = 9.075 * u.hour
+        self.Bond_albedo = 0.03
+
+    @property
+    def M(self):
+        return (self.GM/const.G).to('kg')
+
+    @property
+    def bulk_density(self):
+        return (self.M/self.shape.volume).to('kg/m3')
+
+    @property
+    def refractive_index(self):
+        return np.sqrt(self.Kr)
 
     def xsection(self, dist):
         if not isinstance(dist, u.Quantity):
@@ -293,7 +330,9 @@ def imdisp(filename, ds9=None, **kwargs):
         beam.show(ds9)
 
 
-def project(metadata, rc=(Ceres.ra.value, Ceres.rb.value, Ceres.rc.value), saveto=None):
+ceres = Ceres()
+
+def project(metadata, rc=(ceres.shape.ra.value, ceres.shape.rb.value, ceres.shape.rc.value), saveto=None):
     """Project images to lat-lon projection
     """
     # load image
@@ -558,21 +597,37 @@ solar_constant = (const.L_sun/(4*np.pi*u.au**2)).to('W/m2')
 class Thermal():
 
     @u.quantity_input(equivalencies=u.temperature())
-    def __init__(self, conductivity: 'W/(m K)'=None, density: 'kg/m3'=None,
-            specific_heat: 'J/(kg K)'=None, thermal_inertia: tiu=None, Theta=None,
-            Omega: '1/s'=None, Period: 's'=None, Tss: 'K'=None, Ab=None,
-            emissivity=None, rh: 'au'=None):
-        self._conductivity = conductivity
-        self._density = density
-        self._specific_heat = specific_heat
-        self._thermal_inertia = thermal_inertia
-        self._Theta = Theta
-        self._Omega = Omega
-        self._Period = Period
-        self._Tss = Tss
-        self._Ab = Ab
-        self.emissivity = emissivity
-        self._rh = rh
+    def __init__(self, body=None,
+            conductivity: 'W/(m K)'=None, density: 'kg/m3'=None,
+            specific_heat: 'J/(kg K)'=None, thermal_inertia: tiu=None,
+            Theta=None, Omega: '1/s'=None, Period: 's'=None, Tss: 'K'=None,
+            Ab=None, emissivity=None, rh: 'au'=None):
+        if not isinstance(body, Body):
+            self.body = None
+            self._conductivity = conductivity
+            self._density = density
+            self._specific_heat = specific_heat
+            self._thermal_inertia = thermal_inertia
+            self._Theta = Theta
+            self._Omega = Omega
+            self._Period = Period
+            self._Tss = Tss
+            self._Ab = Ab
+            self.emissivity = emissivity
+            self._rh = rh
+        else:
+            self._body = body
+            self._conductivity = getattr(body, 'thermal_conductivity', None)
+            self._density = getattr(body, 'surface_density', None)
+            self._specific_heat = getattr(body, 'specific_heat', None)
+            self._thermal_inertia = getattr(body, 'thermal_inertia', None)
+            self._Theta = Theta
+            self._Omega = Omega
+            self._Period = getattr(body, 'rotational_period', None)
+            self._Tss = Tss
+            self._Ab = getattr(body, 'Bond_albedo', None)
+            self.emissivity = getattr(body, 'emissivity', None)
+            self._rh = rh
 
         if self._conductivity is not None:
             self._conductivity = self._conductivity.to('W/(m K)')
@@ -719,7 +774,7 @@ class Thermal():
         if self._Tss is None:
             try:
                 self._Tss = ((1-self._Ab)*solar_constant/self._rh.to('au').value**2/(self.emissivity*const.sigma_sb))**0.25
-            except TypeError:
+            except (TypeError, AttributeError):
                 pass
         return self._Tss
     @Tss.setter
