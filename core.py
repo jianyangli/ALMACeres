@@ -822,8 +822,56 @@ class Thermal():
         else:
             self._rh = var.to('au')
 
-    def thermal_model(self, nt=360, dz=0.5, z1=50, init=None, maxiter=4294967295, tol=1e-5, inc=None, cos=False, verbose=False, benchmark=False):
+    def thermal_model(self, nt=360, dz=0.5, z1=50, init=None, maxiter=10000, tol=1e-5, inc=None, cos=False, verbose=False, benchmark=False):
+        """Calculate the temperature profile on and inside the surface of a
+        rotating body according to thermal physical model.
 
+        Parameters
+        ----------
+
+            nt : Number of time steps in one rotation.  An integer number.
+                Default is 360 if not specified.
+            dz : Step size in dimensionless depth.  Default is 0.5.
+            z1 : The inside boundary of dimensionless depth.  Default is 50.
+            init : Initial 2-D temperature distribution with the same
+                structure as the returned array.  It has to be a 2-D array
+                variable or values.  Default is 0.6*max(cos(inc)) for all
+                depth and all times.
+            maxiter : Maximum number of iterations (rotations).  An integer
+                value or variable.  Default is 4294967295.
+            tol : Tolerance of convergence.  A floating point variable or
+                value.  Default is 1e-5.
+            inc : An array to specify the solar incidence angle in one day.
+                It has to have the same number of elements as specified by
+                parameter nt.  The values of angles are either in degress, if
+                keyword "cos" is not set, or the cosine of angles, if keyword
+                "cos" is set.  User has to ensure that incidence angle is
+                physically meaningful, i.e., for incidence angle higher than 90
+                deg, user should set it to be 90.
+            cos : If set, then keyward inc passes values in cos(incidence
+                angle).  By default, the unit of inc is deg.
+            verbose : Enable verbose mode for the program to print out
+                information and progress after each iteration.
+            benchmark : If set this keyword, program will run with keywords
+                plot and verbose disabled, and print out the CPU time in
+                seconds used for calculation.  This keyword can be used to
+                benchmark the speed of calculation.
+
+        Returns
+        -------
+        None.  Upon return, this method will populate two class attribute,
+        `.temperature_model`, which is a 2D Quantity array stores the model
+        temperature with respect to time and depth, and `.model_param`, which
+        is a `dict` that stores the model parameters.  The items in
+        `.model_param` are:
+        'z' : 1d Quantity array stores the depth corresponding to
+            `.temperature_model`
+        't' : 1d Quantity array stores the times corresponding to
+            `.temperature_model`
+        'insolation' : 1d Quantity array stores the solar flux at times stored
+            in `.model_param['t']
+        'niter' : number of iterations to converge
+        """
         self.model_param = {}
         nz = int(np.ceil(z1/dz) + 1)  # number of depth steps
         zz = np.arange(nz) * dz  # depths
