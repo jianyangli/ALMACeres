@@ -19,6 +19,17 @@ from . import vector
 tiu = u.def_unit('tiu', u.Unit('J/(m2 K s(0.5))'))
 u.add_enabled_units(tiu)
 
+solar_constant = (const.L_sun/(4*np.pi*u.au**2)).to('W/m2')
+
+# absorption length
+absorption_length = lambda n, loss_tangent, wavelength=1.: wavelength/(4*np.pi*n)*(2./((1+loss_tangent*loss_tangent)**0.5-1))**0.5
+
+# absorption length
+absorption_coefficient = lambda n, loss_tangent, wavelength=1.: 1./absorption_length(n, loss_tangent, wavelength)
+
+# loss tangent
+loss_tangent = lambda n, abs_len, wavelength: ((2*(wavelength/(4*np.pi*n*abs_len))**2+1)**2-1)**0.5
+
 
 class TriaxialShape(object):
 
@@ -45,6 +56,7 @@ class TriaxialShape(object):
 
 class Body(object):
     pass
+
 
 # Ceres constants
 class Ceres(Body):
@@ -91,6 +103,9 @@ class Ceres(Body):
         if not q:
             xsec = xsec.to('arcsec2').value
         return xsec
+
+
+ceres = Ceres()
 
 
 class ALMACeresImageMetaData(utils.MetaData):
@@ -330,8 +345,6 @@ def imdisp(filename, ds9=None, **kwargs):
         beam.show(ds9)
 
 
-ceres = Ceres()
-
 def project(metadata, rc=(ceres.shape.ra.value, ceres.shape.rb.value, ceres.shape.rc.value), saveto=None):
     """Project images to lat-lon projection
     """
@@ -434,16 +447,6 @@ class Snell(object):
         if n1 > n2:
             n1, n2 = n2, n1
         return np.rad2deg(np.arcsin(n1/n2))
-
-
-# absorption length
-absorption_length = lambda n, loss_tangent, wavelength=1.: wavelength/(4*np.pi*n)*(2./((1+loss_tangent*loss_tangent)**0.5-1))**0.5
-
-# absorption length
-absorption_coefficient = lambda n, loss_tangent, wavelength=1.: 1./absorption_length(n, loss_tangent, wavelength)
-
-# loss tangent
-loss_tangent = lambda n, abs_len, wavelength: ((2*(wavelength/(4*np.pi*n*abs_len))**2+1)**2-1)**0.5
 
 
 class Layer(object):
@@ -592,7 +595,6 @@ def _shift_1d_array(a, i):
     out[i:] = a[:-i]
     return out
 
-solar_constant = (const.L_sun/(4*np.pi*u.au**2)).to('W/m2')
 
 class Thermal():
 
