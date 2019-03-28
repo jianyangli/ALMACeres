@@ -872,13 +872,27 @@ class Thermal():
             in `.model_param['t']
         'niter' : number of iterations to converge
         """
+        if self.Theta is None:
+            warnings.warn('aborted: thermal parameter is unknown')
+            return
+
         self.model_param = {}
         nz = int(np.ceil(z1/dz) + 1)  # number of depth steps
         zz = np.arange(nz) * dz  # depths
-        self.model_param['z'] = zz*self.skin_depth
+        self.model_param['z'] = zz
         dt = 2 * np.pi / nt  # number of time steps
         tt = np.arange(nt) * dt  # time
-        self.model_param['t'] = tt/self.Omega
+        self.model_param['t'] = tt
+
+        if self.skin_depth is None:
+            warnings.warn("skip depth cannot be calculated, depth parameter `.model_param['z']` will be dimensionless")
+        else:
+            self.model_param['z'] = self.model_param['z'] * self.skin_depth
+        if self.Omega is None:
+            warnings.warn("rotational period unknown, time parameter `.model_param['t']` will be dimensionless")
+        else:
+            self.model_param['t'] = self.model_param['t'] / self.Omega
+
 
         if inc is not None:
             if len(inc) == nt:
@@ -891,9 +905,15 @@ class Thermal():
             else:
                 warnings.warn('wrong parameter `inc` ignored!')
                 insol = np.clip(np.cos(tt), 0, None)
+                insol = _shift_1d_array(insol, nt/2)
         else:
             insol = np.clip(np.cos(tt), 0, None)
-        self.model_param['insolation'] = insol * solar_constant / self.rh.to('au').value**2
+            insol = _shift_1d_array(insol, nt//2)
+        self.model_param['insolation'] = insol
+        if self.rh is None:
+            warnings.warn("heliocentric distance is unknown, solar insolation parameter `.model_param['insolation']` will be dimensionless")
+        else:
+            self.model_param['insolation'] = self.model_param['insolation'] * solar_constant / self.rh.to('au').value**2
 
         r = dt / (dz*dz)
         if r >= 0.5:
@@ -958,7 +978,11 @@ class Thermal():
             print(f'Time for {niter:6d} iterations: {time.time()-t0:.3f} sec')
 
         self.model_param['niter'] = niter
-        self.temperature_model = uu * self.Tss
+        self.temperature_model = uu
+        if self.Tss is None:
+            warnings.warn("subsolar temperature is unknown, temperature model `.temperature_model` will be dimensionless")
+        else:
+            self.temperature_model = self.temperature_model * self.Tss
 
         # print out information
         if verbose:
