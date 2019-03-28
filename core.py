@@ -600,7 +600,7 @@ class Thermal():
 
     """Thermophysical model class.  This class collects the thermal parameters
     to calculate various thermal parameters and 1d temperature model based on
-    thermophysical model.  This class is based on Spencer et al. (1989).
+    thermophysical model.
 
     For the simplest dimensionless thermal model, the only parameter needed is
     the dimensionless "thermal parameter", or the "big Theta".  In this case,
@@ -608,6 +608,14 @@ class Thermal():
 
     If sufficient parameters are supplied, then the temperature model can be
     dimensional with the corresponding physical units.
+
+    The computed `.temperature_model` attributeis a 2-D floating point or
+    `astropy.units.Quantity` array of shape (nt, ceil(z1/dz)+1).  Each
+    line represents the temperature profile with respect to depth at a
+    particular time; and each column represents the temperature profile as
+    a function of time at a certain depth.  The temperature is either
+    dimensionless relative to the sub-solar temperature or in physical
+    unit in equilibrium thermal model.
 
     Examples
     --------
@@ -633,6 +641,22 @@ class Thermal():
     >>> print(t.temperature_model.unit)
     (360, 101)
 
+    Notes
+    -----
+    This program follows the numerical approach discussed in Spencer et al.
+    (1989, Icarus 78, 337-354).
+
+    The calculation starts from the specified initial condition, step in time,
+    and iteration for rotations until the temperature profile with respect to
+    both depth and time stablizes or the maximum number of iteration is
+    reached.  The stablization is determined by the RMS change of temperature
+    profile from one rotation to the next.  The RMS difference is defined as
+        RMS = np.sqrt(np.mean(difference_temperature**2))
+
+    The step sizes in both time and depth affect the stablization of numerical
+    solution.  The default number of steps of 360 in one rotation and default
+    step size of 0.5 in depth work well with big_theta=1.  For other values of
+    big_theta, these parameters may need to be adjusted accordingly.
     """
 
     @u.quantity_input(equivalencies=u.temperature())
@@ -902,7 +926,9 @@ class Thermal():
         None.  Upon return, this method will populate two class attribute,
         `.temperature_model`, which is a 2D Quantity array stores the model
         temperature with respect to time and depth, and `.model_param`, which
-        is a `dict` that stores the model parameters.  The items in
+        is a `dict` that stores the model parameters.
+
+        The items in
         `.model_param` are:
         'z' : 1d Quantity array stores the depth corresponding to
             `.temperature_model`
