@@ -598,6 +598,43 @@ def _shift_1d_array(a, i):
 
 class Thermal():
 
+    """Thermophysical model class.  This class collects the thermal parameters
+    to calculate various thermal parameters and 1d temperature model based on
+    thermophysical model.  This class is based on Spencer et al. (1989).
+
+    For the simplest dimensionless thermal model, the only parameter needed is
+    the dimensionless "thermal parameter", or the "big Theta".  In this case,
+    the temperature model, time, and depth are all dimensionless.
+
+    If sufficient parameters are supplied, then the temperature model can be
+    dimensional with the corresponding physical units.
+
+    Examples
+    --------
+
+    # initialize a dimentionless model and generate temperature distribution
+    >>> from ALMACeres import Thermal
+    >>> t = Thermal(Theta=1.)
+    >>> t.thermal_model()
+    >>> print(type(t.temperature_model))
+    numpy.ndarray
+    >>> print(t.temperature_model.shape)
+    (360, 101)
+
+    # initialize the model with Ceres at 2.77 au, and generate temperature
+    # distribution
+    >>> import astropy.units as u
+    >>> from ALMACeres import Theta, Ceres
+    >>> ceres = Ceres()
+    >>> t = Thermal(body=ceres, rh=2.77*u.au)
+    >>> t.thermal_model()
+    >>> print(type(t.temperature_model))
+    <class 'astropy.units.quantity.Quantity'>
+    >>> print(t.temperature_model.unit)
+    (360, 101)
+
+    """
+
     @u.quantity_input(equivalencies=u.temperature())
     def __init__(self, body=None,
             conductivity: 'W/(m K)'=None, density: 'kg/m3'=None,
@@ -824,7 +861,8 @@ class Thermal():
         else:
             self._rh = var.to('au')
 
-    def thermal_model(self, nt=360, dz=0.5, z1=50, init=None, maxiter=10000, tol=1e-5, inc=None, cos=False, verbose=False, benchmark=False):
+    def thermal_model(self, nt=360, dz=0.5, z1=50, init=None, maxiter=10000,
+            tol=1e-5, inc=None, cos=False, verbose=False, benchmark=False):
         """Calculate the temperature profile on and inside the surface of a
         rotating body according to thermal physical model.
 
@@ -990,3 +1028,5 @@ class Thermal():
         if verbose:
             print()
             print(f'Total iterations: {niter:6d}')
+
+
