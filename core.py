@@ -1,11 +1,14 @@
 """Main ALMA Ceres data processing module
 """
 
+import warnings
 import json
 from os import path
 import numpy as np
-from astropy import units, table, constants, time
+from astropy import table, time
 from astropy.io import fits
+import astropy.units as u
+import astropy.constants as const
 import spiceypy as spice
 from . import utils
 from . import saoimage
@@ -13,8 +16,8 @@ from . import vector
 
 
 # define thermal inertia units
-tiu = units.def_unit('tiu', units.Unit('J/(m2 K s(0.5))'))
-units.add_enabled_units(tiu)
+tiu = u.def_unit('tiu', u.Unit('J/(m2 K s(0.5))'))
+u.add_enabled_units(tiu)
 
 
 # Ceres constants
@@ -22,31 +25,31 @@ class Ceres(object):
     """Basic properties of Ceres
     """
     # body shape and pole based on DLR RC3 shape model
-    ra = 482.64 * units.km
-    rb = 480.60 * units.km
-    rc = 445.57 * units.km
+    ra = 482.64 * u.km
+    rb = 480.60 * u.km
+    rc = 445.57 * u.km
     r = np.sqrt((ra+rb)*rc/2)
     from astropy.coordinates import SkyCoord
-    pole = SkyCoord(ra=291.41*units.deg, dec=66.79*units.deg)
-    GM = 62.68 * units.Unit('km3/s2')
-    M = (GM/constants.G).decompose()
+    pole = SkyCoord(ra=291.41*u.deg, dec=66.79*u.deg)
+    GM = 62.68 * u.Unit('km3/s2')
+    M = (GM/const.G).decompose()
 
     # Thermal and scattering parameters, from Chamberlain et al. (2009)
-    rho = 1240. * units.Unit('kg/m3')  # surface material density, Mitchell et al. (1996)
-    Kr = 1.87**(rho.to('g/cm3').value)  # real dielectric component, formula from Ostro et al. 1999
+    density = 1240. * u.Unit('kg/m3')  # surface material density, Mitchell et al. (1996)
+    Kr = 1.87**(density.to('g/cm3').value)  # real dielectric component, formula from Ostro et al. 1999
     n = np.sqrt(Kr)   # refractive index
-    loss_tangent = 10**(0.44*rho.to('g/cm3').value-2.943)   # loss tangent, formula from Ostro et al. 1999
+    loss_tangent = 10**(0.44*density.to('g/cm3').value-2.943)   # loss tangent, formula from Ostro et al. 1999
     emissivity = 0.9    # emissivity, typical value
-    I = 15.*tiu   # thermal inertia, Spencer 1990
-    c = 750.*units.J/units.K   # specific heat, typcial rock value
+    thermal_inertia = 15.*tiu   # thermal inertia, Spencer 1990
+    specific_heat = 750.*u.J/(u.K*u.kg)   # specific heat, typcial rock value
 
     def xsection(self, dist):
-        if not isinstance(dist, units.Quantity):
-            dist = dist*units.au
+        if not isinstance(dist, u.Quantity):
+            dist = dist*u.au
             q = False
         else:
             q = True
-        equiv = units.dimensionless_angles()
+        equiv = u.dimensionless_angles()
         xsec = np.pi*((Ceres.ra+Ceres.rb)/(2*dist)).to('arcsec',equivalencies=equiv)*(Ceres.rc/dist).to('arcsec', equivalencies=equiv)
         if not q:
             xsec = xsec.to('arcsec2').value
@@ -186,11 +189,11 @@ class Beam():
         major, minor: number or astropy Quantity, major and minor axes.
             Default unit arcsec if not Quantity
         """
-        if not isinstance(major, units.Quantity):
-            major = major * units.arcsec
+        if not isinstance(major, u.Quantity):
+            major = major * u.arcsec
         self.major = major
-        if not isinstance(minor, units.Quantity):
-            minor = minor * units.arcsec
+        if not isinstance(minor, u.Quantity):
+            minor = minor * u.arcsec
         self.minor = minor
 
     @property
@@ -226,7 +229,7 @@ def photometry(filenames, centers, rapt=100, outfile=None):
         im,hdr = utils.readfits(f,verbose=False,header=True)
         im = np.squeeze(im)
         sz = im.shape
-        bm = Beam(hdr['BMAJ']*units.deg,hdr['BMIN']*units.deg).area.to('arcsec2').value
+        bm = Beam(hdr['BMAJ']*u.deg,hdr['BMIN']*u.deg).area.to('arcsec2').value
         bms.append(bm)
         apt = phot.CircularAperture(c,r)
         ftot = utils.apphot(im, apt)['aperture_sum'][0]
@@ -255,15 +258,15 @@ def brightness_temperature(flux, freq, dist):
 
     Return : brightness temperature in K
     '''
-    if not isinstance(flux, units.Quantity):
-        flux = flux*units.Jy
-    if not isinstance(freq, units.Quantity):
-        freq = freq*units.Hz
-    if not isinstance(dist, units.Quantity):
-        dist = dist*units.au
+    if not isinstance(flux, u.Quantity):
+        flux = flux*u.Jy
+    if not isinstance(freq, u.Quantity):
+        freq = freq*u.Hz
+    if not isinstance(dist, u.Quantity):
+        dist = dist*u.au
     area = Ceres().xsection(dist)
-    equiv = units.brightness_temperature(area, freq)
-    return flux.to(units.K,equivalencies=equiv)
+    equiv = u.brightness_temperature(area, freq)
+    return flux.to(u.K,equivalencies=equiv)
 
 
 def imdisp(filename, ds9=None, **kwargs):
@@ -297,7 +300,7 @@ def project(metadata, rc=(Ceres.ra.value, Ceres.rb.value, Ceres.rc.value), savet
     fname = path.join(metadata.path, metadata.name)
     im = utils.readfits(fname, verbose=False)
     im = np.squeeze(im)
-    im /= Beam(metadata.bmaj*units.mas,metadata.bmin*units.mas).area.to('arcsec2').value  # in Jy/arcsec**2
+    im /= Beam(metadata.bmaj*u.mas,metadata.bmin*u.mas).area.to('arcsec2').value  # in Jy/arcsec**2
 
     # project to (lon, lat)
     lat,lon = utils.makenxy(-90,90,91,0,358,180)
@@ -355,7 +358,7 @@ class Snell(object):
         if sinangle > 1:
             return np.nan
         a = np.arcsin(sinangle)
-        if not isinstance(angle, units.Quantity):
+        if not isinstance(angle, u.Quantity):
             a = np.rad2deg(a)
         return a
 
@@ -542,3 +545,319 @@ class Surface(object):
             return m, prof
         else:
             return m
+
+
+def _shift_1d_array(a, i):
+    out = np.empty_like(a)
+    out[:i] = a[-i:]
+    out[i:] = a[:-i]
+    return out
+
+solar_constant = (const.L_sun/(4*np.pi*u.au**2)).to('W/m2')
+
+class Thermal():
+
+    @u.quantity_input(equivalencies=u.temperature())
+    def __init__(self, conductivity: 'W/(m K)'=None, density: 'kg/m3'=None,
+            specific_heat: 'J/(kg K)'=None, thermal_inertia: tiu=None, Theta=None,
+            Omega: '1/s'=None, Period: 's'=None, Tss: 'K'=None, Ab=None,
+            emissivity=None, rh: 'au'=None):
+        self._conductivity = conductivity
+        self._density = density
+        self._specific_heat = specific_heat
+        self._thermal_inertia = thermal_inertia
+        self._Theta = Theta
+        self._Omega = Omega
+        self._Period = Period
+        self._Tss = Tss
+        self._Ab = Ab
+        self.emissivity = emissivity
+        self._rh = rh
+
+        if self._conductivity is not None:
+            self._conductivity = self._conductivity.to('W/(m K)')
+        if self._density is not None:
+            self._density = self._density.to('kg/m3')
+        if self._specific_heat is not None:
+            self._specific_heat = self._specific_heat.to('J/(kg K)')
+        if self._thermal_inertia is not None:
+            self._thermal_inertia = self._thermal_inertia.to(tiu)
+        if self._Theta is not None:
+            self._Theta = self._Theta * u.dimensionless_unscaled
+        if self._Omega is not None:
+            self._Omega = self._Omega.to('1/s')
+        if self._Period is not None:
+            self._Period = self._Period.to('s')
+        if self._Tss is not None:
+            self._Tss = self._Tss.to('K', u.temperature())
+        if self._Ab is not None:
+            self._Ab = self._Ab * u.dimensionless_unscaled
+        if self.emissivity is not None:
+            self.emissivity = self.emissivity * u.dimensionless_unscaled
+        if self._rh is not None:
+            self._rh = self._rh.to('au')
+
+    @property
+    def conductivity(self):
+        if self._conductivity is None:
+            try:
+                self._conductivity = (self._thermal_inertia**2/(self._density*self._specific_heat)).to('W/(m K)')
+            except TypeError:
+                pass
+        return self._conductivity
+    @conductivity.setter
+    @u.quantity_input(var=['W/(m K)', None])
+    def conductivity(self, var):
+        if var is None:
+            self._conductivity = None
+        else:
+            self._conductivity = var.to('W/(m K)')
+
+    @property
+    def density(self):
+        if self._density is None:
+            try:
+                self._density = (self._thermal_inertia**2/(self._conductivity*self._specific_heat)).to('kg/m3')
+            except TypeError:
+                pass
+        return self._density
+    @density.setter
+    @u.quantity_input(var=['kg/m3', None])
+    def density(self, var):
+        if var is None:
+            self._density = None
+        else:
+            self._density = var.to('kg/m3')
+
+    @property
+    def specific_heat(self):
+        if self._specific_heat is None:
+            try:
+                self._specific_heat = (self._thermal_inertia**2/(self._conductivity*self._density)).to('J/(kg K)')
+            except TypeError:
+                pass
+        return self._specific_heat
+    @specific_heat.setter
+    @u.quantity_input(var=['J/(kg K)', None])
+    def specific_heat(self, var):
+        if var is None:
+            self._specific_heat = None
+        else:
+            self._specific_heat = var.to('J/(kg K)')
+
+    @property
+    def thermal_inertia(self):
+        if self._thermal_inertia is None:
+            try:
+                self._thermal_inertia = np.sqrt(self._conductivity*self._density*self._specific_heat).to(tiu)
+            except TypeError:
+                pass
+        return self._thermal_inertia
+    @thermal_inertia.setter
+    @u.quantity_input(var=[tiu, None])
+    def thermal_inertia(self, var):
+        if var is None:
+            self._thermal_inertia = None
+        else:
+            self._thermal_inertia = var.to(tiu)
+
+    @property
+    def Theta(self):
+        if self._Theta is None:
+            if self._thermal_inertia is None:
+                thermal_inertia = self.thermal_inertia
+            if self._Omega is None:
+                Omega = self.Omega
+            if self._Tss is None:
+                Tss = self.Tss
+            try:
+                self._Theta = (self._thermal_inertia*np.sqrt(self._Omega)/(self.emissivity*const.sigma_sb*self._Tss**3)).decompose()
+            except (TypeError, AttributeError):
+                pass
+        return self._Theta
+    @Theta.setter
+    def Theta(self, var):
+        if var is None:
+            self._Theta = var
+        else:
+            self._Theta = var * u.dimensionless_unscaled
+
+    @property
+    def Omega(self):
+        if self._Omega is None:
+            try:
+                self._Omega = (2*np.pi/self._Period).to('1/s')
+            except TypeError:
+                pass
+        return self._Omega
+    @Omega.setter
+    @u.quantity_input(var=['1/s', None])
+    def Omega(self, var):
+        if var is None:
+            self._Omega = None
+        else:
+            self._Omega = var.to('1/s')
+
+    @property
+    def Period(self):
+        if self._Period is None:
+            try:
+                self._Period = (2*np.pi/self._Omega).to('s')
+            except TypeError:
+                pass
+        return self._Period
+    @Period.setter
+    @u.quantity_input(var=['s', None])
+    def Period(self, var):
+        if var is None:
+            self._Period = None
+        else:
+            self._Period = var.to('s')
+
+    @property
+    def Tss(self):
+        if self._Tss is None:
+            try:
+                self._Tss = ((1-self._Ab)*solar_constant/self._rh.to('au').value**2/(self.emissivity*const.sigma_sb))**0.25
+            except TypeError:
+                pass
+        return self._Tss
+    @Tss.setter
+    @u.quantity_input(var='K')
+    def Tss(self, var):
+        if var is None:
+            self._Tss = None
+        else:
+            self._Tss = var.to('K')
+
+    @property
+    def Ab(self):
+        return self._Ab
+    @Ab.setter
+    def Ab(self, var):
+        if var is None:
+            self._Ab = None
+        else:
+            self._Ab = var * u.dimensionless_unscaled
+
+    @property
+    def skin_depth(self):
+        try:
+            if self._Omega is None:
+                Omega = self.Omega
+            if self._conductivity is None:
+                conductivity = self.conductivity
+            if self._density is None:
+                density = self.density
+            if self._specific_heat is None:
+                specific_heat = self.specific_heat
+            skin_depth = np.sqrt(self._conductivity/(self._density*self._specific_heat*self._Omega)).to('m')
+        except TypeError:
+            skin_depth = None
+        return skin_depth
+
+    @property
+    def rh(self):
+        return self._rh
+    @rh.setter
+    @u.quantity_input(var='au')
+    def rh(self, var):
+        if var is None:
+            self._rh = None
+        else:
+            self._rh = var.to('au')
+
+    def thermal_model(self, nt=360, dz=0.5, z1=50, init=None, maxiter=4294967295, tol=1e-5, inc=None, cos=False, verbose=False, benchmark=False):
+
+        self.model_param = {}
+        nz = int(np.ceil(z1/dz) + 1)  # number of depth steps
+        zz = np.arange(nz) * dz  # depths
+        self.model_param['z'] = zz*self.skin_depth
+        dt = 2 * np.pi / nt  # number of time steps
+        tt = np.arange(nt) * dt  # time
+        self.model_param['t'] = tt/self.Omega
+
+        if inc is not None:
+            if len(inc) == nt:
+                if cos:
+                    insol = inc
+                else:
+                    insol = np.cos(np.deg2rad(inc))
+                if (insol < 0).any():
+                    warnings.warn('some solar incidence angle < 90 deg')
+            else:
+                warnings.warn('wrong parameter `inc` ignored!')
+                insol = np.clip(np.cos(tt), 0, None)
+        else:
+            insol = np.clip(np.cos(tt), 0, None)
+        self.model_param['insolation'] = insol * solar_constant / self.rh.to('au').value**2
+
+        r = dt / (dz*dz)
+        if r >= 0.5:
+            warnings.warn('time step is too large, and solution may not converge')
+
+        if verbose:
+            print('Solve 1-D heat conduction equation:')
+            print(f'    Thermal parameter = {self.Theta:.3f}')
+            print(f'    Time steps = {nt:6d} per cycle')
+            print(f'    Inner depth = {z1:.3f} thermal skin depth(s)')
+            print(f'    Depth step size = {dz:.3f}')
+            print(f'    dt/(dz^2) = {r:.3f}')
+            print(f'    Maximum iteration = {maxiter}')
+            print(f'    RMS Tolerance = {tol:.3g}')
+            print()
+
+        if init is None:
+            uu = np.ones((nt, nz)) * 0.6 * insol.max()
+        else:
+            uu0 = np.asarray(init)
+            if uu0.shape != (nt, nz):
+                warnings.warn('Warning: Invalid initial condition is ignored!')
+                uu = np.ones((nt, nz)) * 0.6 * insol.max()
+            else:
+                uu = uu0
+
+        if benchmark:
+            import time
+            t0 = time.time()
+
+        niter = 0
+        rms = 1.
+        while (rms > tol) and (niter < maxiter):
+            uu1 = uu.copy()
+            # loop through one rotation
+            for i in range(nt):
+                # index for i+1'th time
+                next_step = (i+1) % nt
+                # propagate one time step
+                uu[next_step] = (1-2*r)*uu[i]+r*(_shift_1d_array(uu[i],1)+_shift_1d_array(uu[i],-1))
+                # boundary conditions
+                # surface
+                uu[next_step,0] = uu[i,0]+2*r*(uu[i,1]-uu[i,0])-2*dt/(dz*self.Theta)*(uu[i,0]**4-insol[i])
+                # inside
+                uu[next_step,-1] = uu[next_step,-2]
+            # increase iteration counter
+            niter += 1
+            # calculate RMS difference
+            diff = uu1-uu
+            ww = uu != 0
+            rdiff = diff[ww]/uu[ww]
+            # rms = np.clip(np.sqrt(np.mean(rdiff*rdiff)), None, np.sqrt(np.mean(diff*diff))*1e4)
+            rms = np.sqrt((rdiff*rdiff).mean())
+
+            # print out progress
+            if verbose:
+                # find the time of maximum temperature on the surface
+                ww = uu[:,0].argmax()
+                print(f'Iter #{niter:6d}: RMS = {rms:.3g}, Max. surf. T = {uu.max():.3f} @ LST {(tt[ww]/(2*np.pi)*24+12) % 24:.2f} hrs, Term. T = {uu[:,nz-1].min():.3f}')
+
+        if benchmark:
+            print(f'Time for {niter:6d} iterations: {time.time()-t0:.3f} sec')
+
+        self.model_param['niter'] = niter
+        self.temperature_model = uu * self.Tss
+
+        # print out information
+        if verbose:
+            print()
+            print(f'Total iterations: {niter:6d}')
