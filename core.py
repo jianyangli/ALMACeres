@@ -1056,3 +1056,74 @@ class Thermal():
             print(f'Total iterations: {niter:6d}')
 
 
+class SphereSurfaceTemperature():
+
+    @u.quantity_input
+    def __init__(self, tpm, sunlat: u.deg=0*u.deg, dlat: u.deg=5*u.deg):
+        self.tpm = tpm
+        self.sunlat = sunlat
+        self.dlat = dlat
+
+    def thermal_model(self, nt=360, dz=0.5, z1=50, init=None, maxiter=10000, tol=1e-4, verbose=False):
+
+        if self.tpm.Theta is None:
+            warnings.warn('aborted: thermal parameter is unknown')
+            return
+
+        self.model_param = {}
+        nz = int(np.ceil(z1/dz)+1)  # number of steps in depth
+        nlat = int(180/self.dlat.to('deg').value+1)   # number of latitudinal zones
+        lats =  np.linspace(-90, 90, nlat)  # latitudes of all zones
+        self.model_param['latitudes'] = lats
+
+        # initial condition
+        if init is not None:
+            tt0 = np.asarray(init)
+            if tt0.shape == (nt, nz, nlat):
+                tt = tt0
+            else:
+                warnings.warn('invalid initial condition is ignored')
+                tt = np.ones((nt, nz, nlat)) * 0.4
+        else:
+            tt = np.ones((nt, nz, nlat)) * 0.4
+
+        # solar vector assuming solar longitude 0
+        sunvec = vector.Vector(1, 0, self.sunlat.to('rad').value, type='geo')
+        lons = np.arange(nt)/nt*360   # longitudes for all time steps
+
+        # loop through all latitudinal zones
+        niter = np.zeros(nlat, dtype=int)
+        insol = []
+        for i, lt in enumerate(lats):
+            if verbose:
+                print()
+                print(f'Latitude = {lt:.2f} deg')
+                print()
+
+            # calculate solar incidence angles at all time steps
+            norm = vector.Vector(np.ones_like(lons), lons, np.repeat(lt, nt), type='geo', deg=True)
+            inc = np.clip(np.cos(sunvec.vsep(norm)), 0, None)
+
+            # calculate temperature only when the sun raises above horizon
+            # some time in a day
+            if inc.max() > 1e-5:
+                tt[...,i] = self.tpm.thermal_model(nt=nt, dz=dz ,z1=z1 ,inc=inc, cos=True, verbose=verbose ,tol=tol, init=np.squeeze(tt[...,i]), maxiter=maxiter)
+                niter[i] = self.tpm.model_param['niter']
+                insol.append(self.tpm.model_param['insolation'])
+            else:
+                tt[...,i]=0.
+                niter[i] = 0
+                insol.append(np.zeros(nt))
+
+        isquan = [isinstance(x, u.Quantity) for x in insol]
+        if np.any(isquan):
+            for i in range(len(insol)):
+                if not isquan[i]:
+                    insol[i] = insol[i]*u.Unit('W/m2')
+        insol = u.Quantity(insol)
+
+        self.temperature_model = tt
+        self.model_param['z'] = self.tpm.model_param['z']
+        self.model_param['t'] = self.tpm.model_param['t']
+        self.model_param['insolation'] = insol
+
