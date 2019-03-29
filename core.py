@@ -1074,7 +1074,7 @@ class SphereSurfaceTemperature():
         nz = int(np.ceil(z1/dz)+1)  # number of steps in depth
         nlat = int(180/self.dlat.to('deg').value+1)   # number of latitudinal zones
         lats =  np.linspace(-90, 90, nlat)  # latitudes of all zones
-        self.model_param['latitudes'] = lats
+        self.model_param['latitudes'] = lats * u.deg
 
         # initial condition
         if init is not None:
@@ -1090,6 +1090,7 @@ class SphereSurfaceTemperature():
         # solar vector assuming solar longitude 0
         sunvec = vector.Vector(1, 0, self.sunlat.to('rad').value, type='geo')
         lons = np.arange(nt)/nt*360   # longitudes for all time steps
+        lons = _shift_1d_array(lons, nt//2)
 
         # loop through all latitudinal zones
         niter = np.zeros(nlat, dtype=int)
@@ -1107,11 +1108,12 @@ class SphereSurfaceTemperature():
             # calculate temperature only when the sun raises above horizon
             # some time in a day
             if inc.max() > 1e-5:
-                tt[...,i] = self.tpm.thermal_model(nt=nt, dz=dz ,z1=z1 ,inc=inc, cos=True, verbose=verbose ,tol=tol, init=np.squeeze(tt[...,i]), maxiter=maxiter)
+                self.tpm.thermal_model(nt=nt, dz=dz ,z1=z1 ,inc=inc, cos=True, verbose=verbose ,tol=tol, init=np.squeeze(tt[...,i]), maxiter=maxiter)
+                tt[...,i] = self.tpm.temperature_model.copy()
                 niter[i] = self.tpm.model_param['niter']
                 insol.append(self.tpm.model_param['insolation'])
             else:
-                tt[...,i]=0.
+                tt[...,i] = 0.
                 niter[i] = 0
                 insol.append(np.zeros(nt))
 
@@ -1123,7 +1125,21 @@ class SphereSurfaceTemperature():
         insol = u.Quantity(insol)
 
         self.temperature_model = tt
-        self.model_param['z'] = self.tpm.model_param['z']
-        self.model_param['t'] = self.tpm.model_param['t']
+        self.model_param['z'] = self.tpm.model_param['z'].copy()
+        self.model_param['t'] = self.tpm.model_param['t'].copy()
         self.model_param['insolation'] = insol
+        self.model_param['niter'] = niter
+
+    def save(self, file, overwrite=False):
+        """Save model temperature to file"""
+        hdu = fits.PrimaryHDU(self.temperature_model.to('K').value)
+        if self.tpm.skin_depth is not None:
+            hdu.header['skindep'] = self.tpm.skin_depth.to('m').value
+        if self.tpm.Period is not None:
+            hdu.header['period'] = self.tpm.Period.to('s').value
+        hdr.writeto(file, overwrite=overwrite)
+        utils.writefits(file, self.model_param['t'].to('s').value, name='Time', append=True)
+        utils.writefits(file, self.model_param['z'].to('m').value, name='Depth', append=True)
+        utils.writefits(file, self.model_param['latitudes'].to('deg').value, name='Lagitude', append=True)
+        utils.writefits(file, self.model_param['niter'], name='niter', append=True)
 
