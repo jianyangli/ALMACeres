@@ -1075,7 +1075,7 @@ class SphereSurfaceTemperature():
         nz = int(np.ceil(z1/dz)+1)  # number of steps in depth
         nlat = int(180/self.dlat.to('deg').value+1)   # number of latitudinal zones
         lats =  np.linspace(-90, 90, nlat)  # latitudes of all zones
-        self.model_param['latitudes'] = lats * u.deg
+        self.model_param['latitude'] = lats * u.deg
 
         # initial condition
         if init is not None:
@@ -1133,15 +1133,29 @@ class SphereSurfaceTemperature():
 
     def save(self, file, overwrite=False):
         """Save model temperature to file"""
+        if getattr(self, 'temperature_model', None) is None:
+            warnings.warn('model not generated yet, no data to save')
+            return
         hdu = fits.PrimaryHDU(self.temperature_model.to('K').value)
         if self.tpm.skin_depth is not None:
-            hdu.header['skindep'] = self.tpm.skin_depth.to('m').value
+            hdu.header['skindep'] = (self.tpm.skin_depth.to('m').value, 'thermal skin depth in m')
         if self.tpm.Period is not None:
-            hdu.header['period'] = self.tpm.Period.to('s').value
+            hdu.header['period'] = (self.tpm.Period.to('s').value, 'thermal cycle period in sec')
         hdu.writeto(file, overwrite=overwrite)
         utils.writefits(file, self.model_param['t'].to('s').value, name='Time', append=True)
         utils.writefits(file, self.model_param['lst'].to('hour').value, name='LST', append=True)
         utils.writefits(file, self.model_param['z'].to('m').value, name='Depth', append=True)
-        utils.writefits(file, self.model_param['latitudes'].to('deg').value, name='Lagitude', append=True)
+        utils.writefits(file, self.model_param['latitude'].to('deg').value, name='Latitude', append=True)
+        utils.writefits(file, self.model_param['insolation'].to('W/m2').value, name='insol', append=True)
         utils.writefits(file, self.model_param['niter'], name='niter', append=True)
 
+    def load(self, file):
+        f = fits.open(file)
+        self.temperature_model = f[0].data.copy() * u.K
+        self.model_param = {}
+        self.model_param['t'] = f['time'].data.copy() * u.s
+        self.model_param['z'] = f['depth'].data.copy() * u.m
+        self.model_param['lst'] = f['lst'].data.copy() * u.hour
+        self.model_param['latitude'] = f['latitude'].data.copy() * u.deg
+        self.model_param['insolation'] = f['insol'].data.copy() * u.Unit('W/m2')
+        self.model_param['niter'] = f['niter'].data.copy()
