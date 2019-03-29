@@ -1038,7 +1038,7 @@ class Thermal():
             if verbose:
                 # find the time of maximum temperature on the surface
                 ww = uu[:,0].argmax()
-                print(f'Iter #{niter:6d}: RMS = {rms:.3g}, Max. surf. T = {uu.max():.3f} @ LST {(tt[ww]/(2*np.pi)*24+12) % 24:.2f} hrs, Term. T = {uu[:,nz-1].min():.3f}')
+                print(f'Iter #{niter:6d}: RMS = {rms:.3g}, Max. surf. T = {uu.max():.3f} @ LST {(tt[ww]/(2*np.pi)*24) % 24:.2f} hrs, Term. T = {uu[:,nz-1].min():.3f}')
 
         if benchmark:
             print(f'Time for {niter:6d} iterations: {time.time()-t0:.3f} sec')
@@ -1049,6 +1049,7 @@ class Thermal():
             warnings.warn("subsolar temperature is unknown, temperature model `.temperature_model` will be dimensionless")
         else:
             self.temperature_model = self.temperature_model * self.Tss
+        self.model_param['lst'] = self.model_param['t']/self.Period*24*u.hour
 
         # print out information
         if verbose:
@@ -1127,6 +1128,7 @@ class SphereSurfaceTemperature():
         self.temperature_model = tt
         self.model_param['z'] = self.tpm.model_param['z'].copy()
         self.model_param['t'] = self.tpm.model_param['t'].copy()
+        self.model_param['lst'] = self.tpm.model_param['lst'].copy()
         self.model_param['insolation'] = insol
         self.model_param['niter'] = niter
 
@@ -1139,6 +1141,7 @@ class SphereSurfaceTemperature():
             hdu.header['period'] = self.tpm.Period.to('s').value
         hdr.writeto(file, overwrite=overwrite)
         utils.writefits(file, self.model_param['t'].to('s').value, name='Time', append=True)
+        utils.writefits(file, self.model_param['lst'].to('hour').value, name='LST', append=True)
         utils.writefits(file, self.model_param['z'].to('m').value, name='Depth', append=True)
         utils.writefits(file, self.model_param['latitudes'].to('deg').value, name='Lagitude', append=True)
         utils.writefits(file, self.model_param['niter'], name='niter', append=True)
