@@ -1080,13 +1080,12 @@ class SphereSurfaceTemperature():
         # initial condition
         if init is not None:
             tt0 = np.asarray(init)
-            if tt0.shape == (nt, nz, nlat):
-                tt = tt0
-            else:
+            if tt0.shape != (nt, nz, nlat):
                 warnings.warn('invalid initial condition is ignored')
-                tt = np.ones((nt, nz, nlat)) * 0.4
+                tt0 = np.ones((nt, nz, nlat)) * 0.4
         else:
-            tt = np.ones((nt, nz, nlat)) * 0.4
+            tt0 = np.ones((nt, nz, nlat)) * 0.4
+        tt = np.zeros_like(tt0) * u.K
 
         # solar vector assuming solar longitude 0
         sunvec = vector.Vector(1, 0, self.sunlat.to('rad').value, type='geo')
@@ -1109,7 +1108,7 @@ class SphereSurfaceTemperature():
             # calculate temperature only when the sun raises above horizon
             # some time in a day
             if inc.max() > 1e-5:
-                self.tpm.thermal_model(nt=nt, dz=dz ,z1=z1 ,inc=inc, cos=True, verbose=verbose ,tol=tol, init=np.squeeze(tt[...,i]), maxiter=maxiter)
+                self.tpm.thermal_model(nt=nt, dz=dz ,z1=z1 ,inc=inc, cos=True, verbose=verbose ,tol=tol, init=np.squeeze(tt0[...,i]), maxiter=maxiter)
                 tt[...,i] = self.tpm.temperature_model.copy()
                 niter[i] = self.tpm.model_param['niter']
                 insol.append(self.tpm.model_param['insolation'])
@@ -1139,7 +1138,7 @@ class SphereSurfaceTemperature():
             hdu.header['skindep'] = self.tpm.skin_depth.to('m').value
         if self.tpm.Period is not None:
             hdu.header['period'] = self.tpm.Period.to('s').value
-        hdr.writeto(file, overwrite=overwrite)
+        hdu.writeto(file, overwrite=overwrite)
         utils.writefits(file, self.model_param['t'].to('s').value, name='Time', append=True)
         utils.writefits(file, self.model_param['lst'].to('hour').value, name='LST', append=True)
         utils.writefits(file, self.model_param['z'].to('m').value, name='Depth', append=True)
