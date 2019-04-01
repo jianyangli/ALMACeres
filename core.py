@@ -35,24 +35,48 @@ class TriaxialShape(object):
 
     @u.quantity_input
     def __init__(self, ra: u.km, rb: u.km, rc: u.km):
-        self.ra = ra
-        self.rb = rb
-        self.rc = rc
+        self.r = u.Quantity([ra, rb, rc])
         self.r_volume_equivalent = (ra*rb*rc)**(1/3)
         self.r_area_equivalent = np.sqrt((ra+rb)*rc/2)
 
     @property
     def surface_area(self):
         p = 1.6075
-        ap = self.ra**p
-        bp = self.rb**p
-        cp = self.rc**p
+        ap = self.a**p
+        bp = self.b**p
+        cp = self.c**p
         return 4*np.pi*((ap*bp+ap*cp+bp*cp)/3)**(1/p)
 
     @property
     def volume(self):
-        return 4/3*np.pi*self.ra*self.rb*self.rc
+        return 4/3*np.pi*self.a*self.b*self.c
 
+    @property
+    def a(self):
+        return self.r[0]
+
+    @a.setter
+    @u.quantity_input
+    def a(self, value: u.km):
+        self.r[0] = value
+
+    @property
+    def b(self):
+        return self.r[1]
+
+    @b.setter
+    @u.quantity_input
+    def b(self, value: u.km):
+        self.r[1] = value
+
+    @property
+    def c(self):
+        return self.r[2]
+
+    @c.setter
+    @u.quantity_input
+    def c(self, value: u.km):
+        self.r[2] = value
 
 class Body(object):
     pass
@@ -345,7 +369,7 @@ def imdisp(filename, ds9=None, **kwargs):
         beam.show(ds9)
 
 
-def project(metadata, rc=(ceres.shape.ra.value, ceres.shape.rb.value, ceres.shape.rc.value), saveto=None):
+def project(metadata, rc=ceres.shape.r.value, saveto=None):
     """Project images to lat-lon projection
     """
     # load image
@@ -1243,17 +1267,12 @@ class TriaxialThermalImage():
     """
 
     @u.quantity_input
-    def __init__(self, obs_lat: u.deg, obs_lst: [u.hour, u.deg],
-            shape=None, tpm=None, pixel_size: u.km=None, image_size=512):
+    def __init__(self, shape=None, tpm=None, pixel_size: [u.km, None]=None,
+                image_size=512):
         """Initialize class object
 
         Parameters
         ----------
-        obs_lat : `astropy.units.Quantity`
-            Sub-observer latitude, must be between [-90, 90] deg.
-        obs_lst : `astropy.units.Quantity`
-            Sub-observer local solar time, must be between [0, 24] hours
-            or [0, 360] deg.
         shape : `TriaxialShape`
             The shape of body to be simulated.  Default is a sphere of size
             100 km
@@ -1263,6 +1282,35 @@ class TriaxialThermalImage():
             If `str` : the file name of surface temperature model generated and
             saved by `SphereTPM` class object
             This property has to be set before any simulation can be performed
+        """
+        if shape is None:
+            self.shape = TriaxialShape(100*u.km, 100*u.km, 100*u.km)
+        else:
+            self.shape = shape
+        if isinstance(tpm, SphereTPM):
+            self.tpm = tpm
+        elif isinstance(tpm, str):
+            self.tpm = SphereTPM.from_file(tpm)
+        else:
+            self.tpm = None
+        self.image_size = image_size
+        if pixel_size is None:
+            self.pixel_size = 512 / (self.shape.r.max() * 2.4)
+        else:
+            self.pixel_size = pixel_size
+        self.image = None
+
+    @u.quantity_input
+    def temperature(self, obs_lat: u.deg, obs_lst: [u.hour, u.deg]):
+        """Calculate temperature image cube
+
+        Parameters
+        ----------
+        obs_lat : `astropy.units.Quantity`
+            Sub-observer latitude, must be between [-90, 90] deg.
+        obs_lst : `astropy.units.Quantity`
+            Sub-observer local solar time, must be between [0, 24] hours
+            or [0, 360] deg.
         pixel_size : `astropy.units.Quantity`
             Pixel size (length scale) at the object to be simulated.  Default
             is such that the size of the simulated image is 1.2x the largest
@@ -1270,22 +1318,4 @@ class TriaxialThermalImage():
         image_size : number
             The size of simulated image
         """
-        self.obs_lat = obs_lat
-        self.obs_lst = obs_lst
-        if shape is None:
-            self.shape = TriaxialShape(100*u.km, 100*u.km, 100*u.km)
-        else:
-            self.shape = shape
-        self.image_size = 512
-        if pixel_size is None:
-            rmax = np.max(shape.ra, shape.rb, shape.rc)
-            self.pixel_size = 512 / (rmax * 2.4)
-        else:
-            self.pixel_size = pixel_size
-        self.image is None
-        if isinstance(tpm, Spheretpm):
-            self.tpm = tpm
-        elif isinstance(tpm, str):
-            self.tpm = SphereTPM.from_file(tpm)
-        else:
-            self.tpm = None
+        pass
