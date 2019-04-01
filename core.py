@@ -1062,16 +1062,18 @@ class Thermal():
 class SphereSurfaceTemperature():
 
     @u.quantity_input
-    def __init__(self, tpm, sunlat: u.deg=0*u.deg, dlat: u.deg=5*u.deg):
+    def __init__(self, tpm=None, sunlat: u.deg=0*u.deg, dlat: u.deg=5*u.deg):
         self.tpm = tpm
         self.sunlat = sunlat
         self.dlat = dlat
 
     def thermal_model(self, nt=360, dz=0.5, z1=50, init=None, maxiter=10000, tol=1e-4, verbose=False):
 
+        if self.tpm is None:
+            raise ValueError('no thermal model is defined')
+
         if self.tpm.Theta is None:
-            warnings.warn('aborted: thermal parameter is unknown')
-            return
+            raise ValueError('thermal parameter is unknown')
 
         self.model_param = {}
         nz = int(np.ceil(z1/dz)+1)  # number of steps in depth
@@ -1140,9 +1142,10 @@ class SphereSurfaceTemperature():
             return
         hdu = fits.PrimaryHDU(self.temperature_model.to('K').value)
         if self.tpm.skin_depth is not None:
-            hdu.header['skindep'] = (self.tpm.skin_depth.to('m').value, 'thermal skin depth in m')
+            hdu.header['sunlat'] = self.sunlat.to('deg').value, 'sub-solar latitude (deg)'
+            hdu.header['skindep'] = (self.tpm.skin_depth.to('m').value, 'thermal skin depth (m)')
         if self.tpm.Period is not None:
-            hdu.header['period'] = (self.tpm.Period.to('s').value, 'thermal cycle period in sec')
+            hdu.header['period'] = (self.tpm.Period.to('s').value, 'thermal cycle period (sec)')
         hdu.writeto(file, overwrite=overwrite)
         utils.writefits(file, self.model_param['t'].to('s').value, name='Time', append=True)
         utils.writefits(file, self.model_param['lst'].to('hour').value, name='LST', append=True)
@@ -1153,6 +1156,7 @@ class SphereSurfaceTemperature():
 
     def load(self, file):
         f = fits.open(file)
+        self.sunlat = f[0].header['sunlat'] * u.deg
         self.temperature_model = f[0].data.copy() * u.K
         self.model_param = {}
         self.model_param['t'] = f['time'].data.copy() * u.s
@@ -1161,6 +1165,12 @@ class SphereSurfaceTemperature():
         self.model_param['latitude'] = f['latitude'].data.copy() * u.deg
         self.model_param['insolation'] = f['insol'].data.copy() * u.Unit('W/m2')
         self.model_param['niter'] = f['niter'].data.copy()
+
+    @classmethod
+    def from_file(cls, file):
+        out = cls()
+        out.load(file)
+        return out
 
 
 class TriaxialThermalImage():
