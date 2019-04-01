@@ -892,43 +892,46 @@ class Thermal():
         Parameters
         ----------
 
-            nt : Number of time steps in one rotation.  An integer number.
-                Default is 360 if not specified.
-            dz : Step size in dimensionless depth.  Default is 0.5.
-            z1 : The inside boundary of dimensionless depth.  Default is 50.
-            init : Initial 2-D temperature distribution with the same
-                structure as the returned array.  It has to be a 2-D array
-                variable or values.  Default is 0.6*max(cos(inc)) for all
-                depth and all times.
-            maxiter : Maximum number of iterations (rotations).  An integer
-                value or variable.  Default is 4294967295.
-            tol : Tolerance of convergence.  A floating point variable or
-                value.  Default is 1e-5.
-            inc : An array to specify the solar incidence angle in one day.
-                It has to have the same number of elements as specified by
-                parameter nt.  The values of angles are either in degress, if
-                keyword "cos" is not set, or the cosine of angles, if keyword
-                "cos" is set.  User has to ensure that incidence angle is
-                physically meaningful, i.e., for incidence angle higher than 90
-                deg, user should set it to be 90.
-            cos : If set, then keyward inc passes values in cos(incidence
-                angle).  By default, the unit of inc is deg.
-            verbose : Enable verbose mode for the program to print out
-                information and progress after each iteration.
-            benchmark : If set this keyword, program will run with keywords
-                plot and verbose disabled, and print out the CPU time in
-                seconds used for calculation.  This keyword can be used to
-                benchmark the speed of calculation.
+            nt : int
+                Number of time steps in one thermal cycle.
+            dz : float
+                Dimensionless depth step size in unit of thermal skin depth.
+            z1 : int
+                Dimensionless depth boundary in unit of thermal skin depth.
+            init : 2d array_like of float
+                Initial 2-D temperature distribution.  Same shape as the
+                returned temperature model.  Default is 0.6*max(cos(inc)) for
+                all depth and times.
+            maxiter : int
+                Maximum number of iterations (thermal cycles).
+            tol : float
+                Tolerance of convergence.
+            inc : 1d array_like float or `astropy.units.Quantity`
+                Sequence of solar incidence angle (`cos=False`) or the cosines
+                thereof (`cos=True`) in one thermal cycle.  It must have the
+                same shape as `nt`.  User has to ensure that incidence angle is
+                physically meaningful, i.e., <90 deg or `cos(inc)>0`.
+            cos : bool
+                Specify whether `inc` is incidence angles or the cosines of.
+            verbose : bool
+                Enable verbose mode for the program to print out information
+                and progress after each iteration.
+            benchmark : bool
+                If `True`, program will run with keywords plot and verbose
+                disabled, and print out the CPU time in seconds used for
+                calculation.  This keyword can be used to benchmark the speed
+                of calculation.
 
         Returns
         -------
         None.  Upon return, this method will populate two class attribute,
-        `.temperature_model`, which is a 2D Quantity array stores the model
-        temperature with respect to time and depth, and `.model_param`, which
-        is a `dict` that stores the model parameters.
+        `.temperature_model` and `.model_param`
 
-        The items in
-        `.model_param` are:
+        `.temperature_model` saves the model temperature with respect to time
+        and depth.
+
+        `.model_param` is a `dict` that stores the model parameters.  The items
+        are:
         'z' : 1d Quantity array stores the depth corresponding to
             `.temperature_model`
         't' : 1d Quantity array stores the times corresponding to
@@ -1060,14 +1063,55 @@ class Thermal():
 
 
 class SphereTPM():
+    """TPM model on a sphere
+
+    Class object is initialized by a thermal physical model, the sub-solar
+    latitude, the latitude grid size, and calculates the temperautre model.
+
+    The temperature model is saved in property `.temperature_model`, and the
+    model parameters are saved in property `.model_param`.
+
+    `.temperature_model` : 3d `astropy.units.Quantity` of shape (nt, nz, nlat)
+        The temperature model in (time, depth, latitude) grid.
+        `nt` : number of time steps
+        `nz` : number of depth steps
+        `nlat` : number of latitudes
+
+    `.model_param` : dict
+        See `Thermal.model_param`
+    """
 
     @u.quantity_input
     def __init__(self, tpm=None, sunlat: u.deg=0*u.deg, dlat: u.deg=5*u.deg):
+        """
+        Initialize class object
+
+        Parameters
+        ----------
+        tpm : `Thermal`
+            The thermophysical model class object used to calculate temperature
+            model
+        sunlat : `astropy.units.Quantity`
+            Sub-solar latitude
+        dlat : `astropy.units.Quantity`
+            Latitude grid spacing
+        """
         self.tpm = tpm
         self.sunlat = sunlat
         self.dlat = dlat
 
-    def thermal_model(self, nt=360, dz=0.5, z1=50, init=None, maxiter=10000, tol=1e-4, verbose=False):
+    def thermal_model(self, nt=360, dz=0.5, z1=50, init=None, maxiter=10000,
+            tol=1e-4, verbose=False):
+        """Calculate temperature model
+
+        Parameters
+        ----------
+        See `Thermal.thermal_model()` for parameters
+
+        Returns
+        -------
+        None.  Method updates property `.temperature_model`
+        """
 
         if self.tpm is None:
             raise ValueError('no thermal model is defined')
@@ -1076,9 +1120,12 @@ class SphereTPM():
             raise ValueError('thermal parameter is unknown')
 
         self.model_param = {}
-        nz = int(np.ceil(z1/dz)+1)  # number of steps in depth
-        nlat = int(180/self.dlat.to('deg').value+1)   # number of latitudinal zones
-        lats =  np.linspace(-90, 90, nlat)  # latitudes of all zones
+        # number of steps in depth
+        nz = int(np.ceil(z1/dz)+1)
+        # number of latitudinal zones
+        nlat = int(180/self.dlat.to('deg').value+1)
+        # latitudes of all zones
+        lats =  np.linspace(-90, 90, nlat)
         self.model_param['latitude'] = lats * u.deg
 
         # initial condition
@@ -1106,13 +1153,16 @@ class SphereTPM():
                 print()
 
             # calculate solar incidence angles at all time steps
-            norm = vector.Vector(np.ones_like(lons), lons, np.repeat(lt, nt), type='geo', deg=True)
+            norm = vector.Vector(np.ones_like(lons), lons, np.repeat(lt, nt),
+                    type='geo', deg=True)
             inc = np.clip(np.cos(sunvec.vsep(norm)), 0, None)
 
             # calculate temperature only when the sun raises above horizon
             # some time in a day
             if inc.max() > 1e-5:
-                self.tpm.thermal_model(nt=nt, dz=dz ,z1=z1 ,inc=inc, cos=True, verbose=verbose ,tol=tol, init=np.squeeze(tt0[...,i]), maxiter=maxiter)
+                self.tpm.thermal_model(nt=nt, dz=dz ,z1=z1 ,inc=inc, cos=True,
+                    verbose=verbose ,tol=tol, init=np.squeeze(tt0[...,i]),
+                    maxiter=maxiter)
                 tt[...,i] = self.tpm.temperature_model.copy()
                 niter[i] = self.tpm.model_param['niter']
                 insol.append(self.tpm.model_param['insolation'])
@@ -1142,19 +1192,30 @@ class SphereTPM():
             return
         hdu = fits.PrimaryHDU(self.temperature_model.to('K').value)
         if self.tpm.skin_depth is not None:
-            hdu.header['sunlat'] = self.sunlat.to('deg').value, 'sub-solar latitude (deg)'
-            hdu.header['skindep'] = (self.tpm.skin_depth.to('m').value, 'thermal skin depth (m)')
+            hdu.header['sunlat'] = (self.sunlat.to('deg').value,
+                'sub-solar latitude (deg)')
+            hdu.header['skindep'] = (self.tpm.skin_depth.to('m').value,
+                'thermal skin depth (m)')
         if self.tpm.Period is not None:
-            hdu.header['period'] = (self.tpm.Period.to('s').value, 'thermal cycle period (sec)')
+            hdu.header['period'] = (self.tpm.Period.to('s').value,
+                'thermal cycle period (sec)')
         hdu.writeto(file, overwrite=overwrite)
-        utils.writefits(file, self.model_param['t'].to('s').value, name='Time', append=True)
-        utils.writefits(file, self.model_param['lst'].to('hour').value, name='LST', append=True)
-        utils.writefits(file, self.model_param['z'].to('m').value, name='Depth', append=True)
-        utils.writefits(file, self.model_param['latitude'].to('deg').value, name='Latitude', append=True)
-        utils.writefits(file, self.model_param['insolation'].to('W/m2').value, name='insol', append=True)
-        utils.writefits(file, self.model_param['niter'], name='niter', append=True)
+        utils.writefits(file, self.model_param['t'].to('s').value, name='Time',
+            append=True)
+        utils.writefits(file, self.model_param['lst'].to('hour').value,
+            name='LST', append=True)
+        utils.writefits(file, self.model_param['z'].to('m').value,
+            name='Depth', append=True)
+        utils.writefits(file, self.model_param['latitude'].to('deg').value,
+            name='Latitude', append=True)
+        utils.writefits(file, self.model_param['insolation'].to('W/m2').value,
+            name='insol', append=True)
+        utils.writefits(file, self.model_param['niter'], name='niter',
+            append=True)
 
     def load(self, file):
+        """Load temperature model and model parameters from input file
+        """
         f = fits.open(file)
         self.sunlat = f[0].header['sunlat'] * u.deg
         self.temperature_model = f[0].data.copy() * u.K
@@ -1163,11 +1224,14 @@ class SphereTPM():
         self.model_param['z'] = f['depth'].data.copy() * u.m
         self.model_param['lst'] = f['lst'].data.copy() * u.hour
         self.model_param['latitude'] = f['latitude'].data.copy() * u.deg
-        self.model_param['insolation'] = f['insol'].data.copy() * u.Unit('W/m2')
+        self.model_param['insolation'] = f['insol'].data.copy() \
+            * u.Unit('W/m2')
         self.model_param['niter'] = f['niter'].data.copy()
 
     @classmethod
     def from_file(cls, file):
+        """Initialize class object from input file
+        """
         out = cls()
         out.load(file)
         return out
