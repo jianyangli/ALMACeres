@@ -597,7 +597,6 @@ def _shift_1d_array(a, i):
 
 
 class Thermal():
-
     """Thermophysical model class.  This class collects the thermal parameters
     to calculate various thermal parameters and 1d temperature model based on
     thermophysical model.
@@ -1056,6 +1055,9 @@ class Thermal():
             print()
             print(f'Total iterations: {niter:6d}')
 
+    def save(self, file):
+        pass
+
 
 class SphereSurfaceTemperature():
 
@@ -1159,3 +1161,52 @@ class SphereSurfaceTemperature():
         self.model_param['latitude'] = f['latitude'].data.copy() * u.deg
         self.model_param['insolation'] = f['insol'].data.copy() * u.Unit('W/m2')
         self.model_param['niter'] = f['niter'].data.copy()
+
+
+class TriaxialThermalImage():
+    """Simulate the thermal image of a triaxial shape
+
+    """
+
+    @u.quantity_input
+    def __init__(self, shape, so_lat: u.deg, so_lst: [u.hour, u.deg],
+            TPM=None, pixel_size: u.km=None, image_size=512):
+    """Initialize class object
+
+    Parameters
+    ----------
+    TPM:
+    shape : `TriaxialShape`
+    ss_lat : `astropy.units.Quantity`
+        Sub-solar latitude, must be between [-90, 90] deg.
+    so_lat : `astropy.units.Quantity`
+        Sub-observer latitude, must be between [-90, 90] deg.
+    so_lst : `astropy.units.Quantity`
+        Sub-observer local solar time, must be between [0, 24] hours
+        or [0, 360] deg.
+    TPM : `SphereSurfaceTemperature`, str
+        If `SphereSurfaceTemperature` : the object that contains the surface
+        temperature model to be used to calculate thermal image.
+        If `str` : the file name of surface temperature model generated and
+        saved by `SphereSurfaceTemperature` class object
+    pixel_size : `astropy.units.Quantity`
+        Pixel size (length scale) at the object to be simulated.
+    image_size : number
+        The size of simulated image
+    """
+        self.shape = shape
+        self.ss_lat = ss_lat
+        self.so_lat = so_lat
+        self.so_lst = so_lst
+        self.image_size = 512
+        if pixel_size = None:
+            rmax = np.max(shape.ra, shape.rb, shape.rc)
+            self.pixel_size = 512 / (rmax * 2.4)
+        else:
+            self.pixel_size = pixel_size
+        self.image = None
+        if isinstance(TPM, SphereSurfaceTemperature):
+            self.TPM = TPM
+        elif isinstance(TPM, str):
+            self.TPM = SphereSurfaceTemperature.from_file(TPM)
+
