@@ -1243,35 +1243,39 @@ class TriaxialThermalImage():
     """
 
     @u.quantity_input
-    def __init__(self, shape, so_lat: u.deg, so_lst: [u.hour, u.deg],
-            TPM=None, pixel_size: u.km=None, image_size=512):
+    def __init__(self, obs_lat: u.deg, obs_lst: [u.hour, u.deg],
+            shape=None, tpm=None, pixel_size: u.km=None, image_size=512):
         """Initialize class object
 
         Parameters
         ----------
-        TPM:
-        shape : `TriaxialShape`
-        ss_lat : `astropy.units.Quantity`
-            Sub-solar latitude, must be between [-90, 90] deg.
-        so_lat : `astropy.units.Quantity`
+        obs_lat : `astropy.units.Quantity`
             Sub-observer latitude, must be between [-90, 90] deg.
-        so_lst : `astropy.units.Quantity`
+        obs_lst : `astropy.units.Quantity`
             Sub-observer local solar time, must be between [0, 24] hours
             or [0, 360] deg.
-        TPM : `SphereTPM`, str
-            If `SphereTPM` : the object that contains the surface
-            temperature model to be used to calculate thermal image.
+        shape : `TriaxialShape`
+            The shape of body to be simulated.  Default is a sphere of size
+            100 km
+        tpm : `SphereTPM`, str
+            If `SphereTPM` : the object that contains the surface temperature
+            model to be used to calculate thermal image.
             If `str` : the file name of surface temperature model generated and
             saved by `SphereTPM` class object
+            This property has to be set before any simulation can be performed
         pixel_size : `astropy.units.Quantity`
-            Pixel size (length scale) at the object to be simulated.
+            Pixel size (length scale) at the object to be simulated.  Default
+            is such that the size of the simulated image is 1.2x the largest
+            dimension of the shape
         image_size : number
             The size of simulated image
         """
-        self.shape = shape
-        self.ss_lat = ss_lat
-        self.so_lat = so_lat
-        self.so_lst = so_lst
+        self.obs_lat = obs_lat
+        self.obs_lst = obs_lst
+        if shape is None:
+            self.shape = TriaxialShape(100*u.km, 100*u.km, 100*u.km)
+        else:
+            self.shape = shape
         self.image_size = 512
         if pixel_size is None:
             rmax = np.max(shape.ra, shape.rb, shape.rc)
@@ -1279,8 +1283,9 @@ class TriaxialThermalImage():
         else:
             self.pixel_size = pixel_size
         self.image is None
-        if isinstance(TPM, SphereTPM):
-            self.TPM = TPM
-        elif isinstance(TPM, str):
-            self.TPM = SphereTPM.from_file(TPM)
-
+        if isinstance(tpm, Spheretpm):
+            self.tpm = tpm
+        elif isinstance(tpm, str):
+            self.tpm = SphereTPM.from_file(tpm)
+        else:
+            self.tpm = None
