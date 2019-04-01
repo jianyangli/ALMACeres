@@ -1181,40 +1181,40 @@ class TriaxialThermalImage():
     @u.quantity_input
     def __init__(self, shape, so_lat: u.deg, so_lst: [u.hour, u.deg],
             TPM=None, pixel_size: u.km=None, image_size=512):
-    """Initialize class object
+        """Initialize class object
 
-    Parameters
-    ----------
-    TPM:
-    shape : `TriaxialShape`
-    ss_lat : `astropy.units.Quantity`
-        Sub-solar latitude, must be between [-90, 90] deg.
-    so_lat : `astropy.units.Quantity`
-        Sub-observer latitude, must be between [-90, 90] deg.
-    so_lst : `astropy.units.Quantity`
-        Sub-observer local solar time, must be between [0, 24] hours
-        or [0, 360] deg.
-    TPM : `SphereTPM`, str
-        If `SphereTPM` : the object that contains the surface
-        temperature model to be used to calculate thermal image.
-        If `str` : the file name of surface temperature model generated and
-        saved by `SphereTPM` class object
-    pixel_size : `astropy.units.Quantity`
-        Pixel size (length scale) at the object to be simulated.
-    image_size : number
-        The size of simulated image
-    """
+        Parameters
+        ----------
+        TPM:
+        shape : `TriaxialShape`
+        ss_lat : `astropy.units.Quantity`
+            Sub-solar latitude, must be between [-90, 90] deg.
+        so_lat : `astropy.units.Quantity`
+            Sub-observer latitude, must be between [-90, 90] deg.
+        so_lst : `astropy.units.Quantity`
+            Sub-observer local solar time, must be between [0, 24] hours
+            or [0, 360] deg.
+        TPM : `SphereTPM`, str
+            If `SphereTPM` : the object that contains the surface
+            temperature model to be used to calculate thermal image.
+            If `str` : the file name of surface temperature model generated and
+            saved by `SphereTPM` class object
+        pixel_size : `astropy.units.Quantity`
+            Pixel size (length scale) at the object to be simulated.
+        image_size : number
+            The size of simulated image
+        """
         self.shape = shape
         self.ss_lat = ss_lat
         self.so_lat = so_lat
         self.so_lst = so_lst
         self.image_size = 512
-        if pixel_size = None:
+        if pixel_size is None:
             rmax = np.max(shape.ra, shape.rb, shape.rc)
             self.pixel_size = 512 / (rmax * 2.4)
         else:
             self.pixel_size = pixel_size
-        self.image = None
+        self.image is None
         if isinstance(TPM, SphereTPM):
             self.TPM = TPM
         elif isinstance(TPM, str):
