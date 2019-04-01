@@ -1059,7 +1059,7 @@ class Thermal():
         pass
 
 
-class SphereSurfaceTemperature():
+class SphereTPM():
 
     @u.quantity_input
     def __init__(self, tpm=None, sunlat: u.deg=0*u.deg, dlat: u.deg=5*u.deg):
@@ -1194,11 +1194,11 @@ class TriaxialThermalImage():
     so_lst : `astropy.units.Quantity`
         Sub-observer local solar time, must be between [0, 24] hours
         or [0, 360] deg.
-    TPM : `SphereSurfaceTemperature`, str
-        If `SphereSurfaceTemperature` : the object that contains the surface
+    TPM : `SphereTPM`, str
+        If `SphereTPM` : the object that contains the surface
         temperature model to be used to calculate thermal image.
         If `str` : the file name of surface temperature model generated and
-        saved by `SphereSurfaceTemperature` class object
+        saved by `SphereTPM` class object
     pixel_size : `astropy.units.Quantity`
         Pixel size (length scale) at the object to be simulated.
     image_size : number
@@ -1215,8 +1215,8 @@ class TriaxialThermalImage():
         else:
             self.pixel_size = pixel_size
         self.image = None
-        if isinstance(TPM, SphereSurfaceTemperature):
+        if isinstance(TPM, SphereTPM):
             self.TPM = TPM
         elif isinstance(TPM, str):
-            self.TPM = SphereSurfaceTemperature.from_file(TPM)
+            self.TPM = SphereTPM.from_file(TPM)
 
