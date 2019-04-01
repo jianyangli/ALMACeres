@@ -36,8 +36,14 @@ class TriaxialShape(object):
     @u.quantity_input
     def __init__(self, ra: u.km, rb: u.km, rc: u.km):
         self.r = u.Quantity([ra, rb, rc])
-        self.r_volume_equivalent = (ra*rb*rc)**(1/3)
-        self.r_area_equivalent = np.sqrt((ra+rb)*rc/2)
+
+    @property
+    def r_volume_equivalent(self):
+        return (self.a*self.b*self.c)**(1/3)
+
+    @property
+    def r_area_equivalent(self):
+        return np.sqrt((self.a+self.b)*self.c/2)
 
     @property
     def surface_area(self):
