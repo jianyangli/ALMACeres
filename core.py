@@ -1346,7 +1346,7 @@ class AverageBrightnessTemperature(u.SpecificTypeQuantity):
     _equivalent_unit = u.K
 
     @u.quantity_input(wavelength=[u.m, None], equivalencies=u.spectral())
-    def __new__(cls, value, wavelength=None, body=None, **kwargs):
+    def __new__(cls, value, wavelength=None, surface=None, **kwargs):
         """Initialize DiskAverageTemperature
 
         Parameters
@@ -1354,14 +1354,16 @@ class AverageBrightnessTemperature(u.SpecificTypeQuantity):
         wavelength : `astropy.units.Quantity
             Wavelength or frequency or the equivalent quantity corresponding
             to the brightness temperature
-        body : `~Body` class object
-            The body object that contains all the necessary parameters to
-            calculate average brightness temeprature.  See `Ceres` object
+        surface : `Surface`
+            The `Surface` object that does the subsurface calculation.
         **kwargs : other keywords to initialize `astropy.units.Quantity` object
         """
         T = super().__new__(cls, value, **kwargs)
-        T._wavelength = wavelength.to(u.m, equivalencies=u.spectral())
-        T.body = body
+        if wavelength is not None:
+            T._wavelength = wavelength.to(u.m, equivalencies=u.spectral())
+        else:
+            T._wavelength = None
+        T.surface = surface
         return T
 
     @property
@@ -1375,26 +1377,25 @@ class AverageBrightnessTemperature(u.SpecificTypeQuantity):
         return self._wavelength.to(u.Hz, equivalencies=u.spectral())
 
     @classmethod
-    def from_model(cls, files, wavelength, body, savemap=None, benchmark=False, overwrite=True):
+    @u.quantity_input(wavelength=u.m, equivalencies=u.spectral())
+    def from_model(cls, files, surface, wavelength, savemap=None,
+            overwrite=True, benchmark=False,):
         """Calculate disk-averaged temperature from simulated images
 
         Parameters
         ----------
         files : `str`
-            The names of files that contain the temperature image or cube.
-            If image, then the average will simply be taken as the average
+            The names of FITS files that contain the temperature image or cube.
+            If 2d image, then the average will simply be taken as the average
             over the disk.
-            If cube, then the first dimension is taken as the depth
-            dimension.  In this case, the first extension should store the
-            depth array, and the third dimension the emission angle array.
-            The thermal skin depth should be in the primary extension in key
-            'SKIN'.
+            If 3d cube, then the first dimension is taken as the depth.  In
+            this case, the first extension of the FITS file should store the
+            depth array, and the second dimension the emission angle array.
+        surface : `Surface`
+            The `Surface` object that does the subsurface calculation.
         wavelength : `astropy.units.Quantity
             Wavelength or frequency or the equivalent quantity corresponding
             to the brightness temperature
-        body : `~Body` class object
-            The body object that contains all the necessary parameters to
-            calculate average brightness temeprature.  See `Ceres` object
 
         Returns
         -------
@@ -1402,9 +1403,12 @@ class AverageBrightnessTemperature(u.SpecificTypeQuantity):
         calculated from the input file.
         """
         # initialize subsurface layer
-        layer = Layer(body.n, body.loss_tangent, emissivity=body.emissivity)
-        surface = Surface(layer)
+        if savemap is not None:
+            savemap = savemap.split('.')
 
+        wavelength = wavelength.to('m', u.spectral())
+        if isinstance(files, str):
+            files = [files]
         t = np.empty(len(files))
         for i,f in enumerate(files):
             print(i, path.basename(f))
@@ -1415,6 +1419,8 @@ class AverageBrightnessTemperature(u.SpecificTypeQuantity):
             elif len(im[0].data.shape) == 3:
                 t_eff = np.zeros_like(im[0].data[0])
                 inside = im[0].data[0] > 0
+                if len(np.where(inside)[0]) > 71400:
+                    warnings.warn('computational time could be > 30 s')
                 if benchmark:
                     print(len(np.where(inside)[0]))
                     j=0
@@ -1427,11 +1433,19 @@ class AverageBrightnessTemperature(u.SpecificTypeQuantity):
                             print(j, t1-t0)
                             t0 = t1
                     from scipy.interpolate import interp1d
-                    layer.profile = interp1d(im[1].data, im[0].data[:,i1,i2], kind='cubic', bounds_error=False, fill_value=(None, im[0].data[-1,i1,i2]))
-                    t_eff[i1, i2] = surface.emission(im[2].data[i1, i2], wavelength)
+                    surface.layers[0].profile = interp1d(im[1].data,
+                        im[0].data[:,i1,i2], kind='cubic', bounds_error=False,
+                        fill_value=(None, im[0].data[-1,i1,i2]))
+                    t_eff[i1, i2] = surface.emission(im[2].data[i1, i2],
+                        wavelength.value)
                     if benchmark:
                         j+=1
                 t[i] = t_eff[inside].mean()
+
                 if savemap is not None:
-                    utils.writefits(savemap, t_eff, overwrite=overwrite)
-        return cls(t*u.K, wavelength*u.m, body)
+                    filename = savemap.copy()
+                    filename[-2] = filename[-2]+f'_{i:03d}'
+                    filename = '.'.join(filename)
+                    utils.writefits(filename, t_eff, overwrite=overwrite)
+
+        return cls(t*u.K, wavelength=wavelength, surface=surface)
