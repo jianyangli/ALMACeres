@@ -606,9 +606,12 @@ class Surface(object):
                 print(f'cos(i) = {cos_i}, coef = {coef}')
             intfunc = lambda z: l.profile(z) * np.exp(-coef*z/cos_i-L)
             if l.depth == np.inf:
-                zz = np.linspace(0,1000,100)
+                if hasattr(l.profile, 'x'):
+                    zz = np.linspace(0, l.profile.x[-1], 1000)
+                else:
+                    zz = np.linspace(0, 1000, 1000)
             else:
-                zz = np.linspace(0,l.depth,100)
+                zz = np.linspace(0, l.depth, 1000)
             if debug:
                 prof['t'].append(l.profile(zz))
                 prof['intprofile'].append(intfunc(zz))
@@ -616,8 +619,9 @@ class Surface(object):
                 prof['L0'].append(L)
                 D += l.depth
             from scipy.integrate import quad
-            integral = quad(intfunc, 0, l.depth, epsrel=epsrel)[0]
-            m += l.emissivity*coef*integral/cos_i
+            # integral = quad(intfunc, 0, l.depth, epsrel=epsrel)[0]
+            integral = (intfunc(zz)[:-1]*(zz[1:]-zz[:-1])).sum()
+            m += coef*integral/cos_i
             # prepare for the next layer
             L += l.depth/cos_i*coef
             emi_ang = np.arccos(cos_i)
