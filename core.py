@@ -84,6 +84,14 @@ class TriaxialShape(object):
     def c(self, value: u.km):
         self.r[2] = value
 
+    @property
+    def equatorial_cross_section(self):
+        return np.pi*(self.a+self.b)*self.c/2
+
+    @property
+    def polar_cross_section(self):
+        return np.pi*self.a*self.b
+
 
 class Body(object):
     pass
