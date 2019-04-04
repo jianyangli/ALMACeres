@@ -84,6 +84,7 @@ class TriaxialShape(object):
     def c(self, value: u.km):
         self.r[2] = value
 
+
 class Body(object):
     pass
 
@@ -109,6 +110,7 @@ class Ceres(Body):
         self.specific_heat = 750.*u.J/(u.K*u.kg)   # specific heat, typcial rock value
         self.rotational_period = 9.075 * u.hour
         self.Bond_albedo = 0.03
+        self.n = 1.3
 
     @property
     def M(self):
@@ -1304,7 +1306,6 @@ class TriaxialThermalImage():
             self.pixel_size = 512 / (self.shape.r.max() * 2.4)
         else:
             self.pixel_size = pixel_size
-        self.image = None
 
     @u.quantity_input
     def temperature(self, obs_lat: u.deg, obs_lst: [u.hour, u.deg]):
@@ -1325,3 +1326,86 @@ class TriaxialThermalImage():
             The size of simulated image
         """
         pass
+
+
+class AverageBrightnessTemperature(u.SpecificTypeQuantity):
+    """Disk averaged temperature"""
+
+    _equivalent_unit = u.K
+
+    @u.quantity_input(wavelength=[u.m, None], equivalencies=u.spectral())
+    def __new__(cls, value, wavelength=None, body=None, **kwargs):
+        """Initialize DiskAverageTemperature
+
+        Parameters
+        ----------
+        wavelength : `astropy.units.Quantity
+            Wavelength or frequency or the equivalent quantity corresponding
+            to the brightness temperature
+        body : `~Body` class object
+            The body object that contains all the necessary parameters to
+            calculate average brightness temeprature.  See `Ceres` object
+        **kwargs : other keywords to initialize `astropy.units.Quantity` object
+        """
+        T = super().__new__(cls, value, **kwargs)
+        T._wavelength = wavelength.to(u.m, equivalencies=u.spectral())
+        T.body = body
+        return T
+
+    @property
+    def wavelength(self):
+        """Wavelength"""
+        return self._wavelength
+
+    @property
+    def frequency(self):
+        """Frequency"""
+        return self._wavelength.to(u.Hz, equivalencies=u.spectral())
+
+    @classmethod
+    def from_simu(cls, files, wavelength, body):
+        """Calculate disk-averaged temperature from simulated images
+
+        Parameters
+        ----------
+        files : `str`
+            The names of files that contain the temperature image or cube.
+            If image, then the average will simply be taken as the average
+            over the disk.
+            If cube, then the first dimension is taken as the depth
+            dimension.  In this case, the first extension should store the
+            depth array, and the third dimension the emission angle array.
+            The thermal skin depth should be in the primary extension in key
+            'SKIN'.
+        wavelength : `astropy.units.Quantity
+            Wavelength or frequency or the equivalent quantity corresponding
+            to the brightness temperature
+        body : `~Body` class object
+            The body object that contains all the necessary parameters to
+            calculate average brightness temeprature.  See `Ceres` object
+
+        Returns
+        -------
+        An `AverageBrightnessTemperature` object with each element
+        calculated from the input file.
+        """
+        # initialize subsurface layer
+        layer = Layer(body.n, body.loss_tangent, emissivity=body.emissivity)
+        surface = Surface(layer)
+
+        t = np.empty(len(files))
+        for i,f in enumerate(files):
+            print(i, f)
+            im = fits.open(f)
+            if len(im[0].data.shape) == 2:
+                inside = im[0].data > 0
+                t[i] = im[0].data[inside].mean()
+            elif len(im[0].data.shape) == 3:
+                t_eff = np.zeros_like(im[0].data[0])
+                inside = im[0].data[0] > 0
+                for i1, i2 in np.array(np.where(inside)).T:
+                    from scipy.interpolate import interp1d
+                    layer.profile = interp1d(im[1].data, im[0].data[:,i1,i2], kind='cubic', bounds_error=False, fill_value=(None, im[0].data[:,i1,i2][-1]), bounds_error=False)
+                    t_eff[i1, i2] = surface.emission(im[2].data[i1, i2], wavelength)
+                t[i] = t_eff[inside].mean()
+        return cls(t*u.K, wavelength, body)
