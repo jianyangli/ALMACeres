@@ -1375,7 +1375,7 @@ class AverageBrightnessTemperature(u.SpecificTypeQuantity):
         return self._wavelength.to(u.Hz, equivalencies=u.spectral())
 
     @classmethod
-    def from_simu(cls, files, wavelength, body):
+    def from_model(cls, files, wavelength, body, savemap=None, benchmark=False, overwrite=True):
         """Calculate disk-averaged temperature from simulated images
 
         Parameters
@@ -1407,7 +1407,7 @@ class AverageBrightnessTemperature(u.SpecificTypeQuantity):
 
         t = np.empty(len(files))
         for i,f in enumerate(files):
-            print(i, f)
+            print(i, path.basename(f))
             im = fits.open(f)
             if len(im[0].data.shape) == 2:
                 inside = im[0].data > 0
@@ -1415,9 +1415,23 @@ class AverageBrightnessTemperature(u.SpecificTypeQuantity):
             elif len(im[0].data.shape) == 3:
                 t_eff = np.zeros_like(im[0].data[0])
                 inside = im[0].data[0] > 0
+                if benchmark:
+                    print(len(np.where(inside)[0]))
+                    j=0
+                    import time
+                    t0 = time.time()
                 for i1, i2 in np.array(np.where(inside)).T:
+                    if benchmark:
+                        if j % 1000 == 0:
+                            t1 = time.time()
+                            print(j, t1-t0)
+                            t0 = t1
                     from scipy.interpolate import interp1d
-                    layer.profile = interp1d(im[1].data, im[0].data[:,i1,i2], kind='cubic', bounds_error=False, fill_value=(None, im[0].data[:,i1,i2][-1]), bounds_error=False)
+                    layer.profile = interp1d(im[1].data, im[0].data[:,i1,i2], kind='cubic', bounds_error=False, fill_value=(None, im[0].data[-1,i1,i2]))
                     t_eff[i1, i2] = surface.emission(im[2].data[i1, i2], wavelength)
+                    if benchmark:
+                        j+=1
                 t[i] = t_eff[inside].mean()
-        return cls(t*u.K, wavelength, body)
+                if savemap is not None:
+                    utils.writefits(savemap, t_eff, overwrite=overwrite)
+        return cls(t*u.K, wavelength*u.m, body)
