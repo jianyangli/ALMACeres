@@ -664,11 +664,9 @@ class Surface(object):
             if debug:
                 print(f'cos(i) = {cos_i}, coef = {coef}')
             intfunc = lambda z: l.profile(z) * np.exp(-coef*z/cos_i-L)
-            if l.depth == np.inf:
-                if hasattr(l.profile, 'x'):
-                    zz = np.linspace(0, l.profile.x[-1], 1000)
-                else:
-                    zz = np.linspace(0, 1000, 1000)
+            dd = -2.3026*np.log10(epsrel)/coef
+            if l.depth > dd:
+                zz = np.linspace(0, dd, 1000)
             else:
                 zz = np.linspace(0, l.depth, 1000)
             if debug:
