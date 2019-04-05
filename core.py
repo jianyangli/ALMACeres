@@ -410,16 +410,20 @@ class Layer(object):
     Based on the models in Keihm & Langseth (1975), Icarus 24, 211-230
     """
 
-    def __init__(self, n, loss_tangent, depth=np.inf, emissivity=1., profile=None):
+    def __init__(self, n, loss_tangent, depth=np.inf, profile=None):
         """
-        n: number, refractive index of this layer
-        loss_tangent: number, loss tengent
-        depth: optional, number, depth of the layer in the same unit as `z`
-            (see below for the description of `profile`)
-        emissivity: optional, number, emissivity
-        profile: optional, callable object, where `profile(z)` returns the
-            physical quantity of the layer at depth `z`.  Most commonly it is a
-            temperature profile, or a thermal emission profile, etc.
+        Parameters
+        ----------
+        n : number
+            Real part of refractive index
+        loss_tangent : number
+            Loss tengent
+        depth : optional, number
+            Depth of the layer in the same unit as `z` (see below for the
+            description of `profile`)
+        profile : optional, callable object
+            `profile(z)` returns the physical quantity of the layer at depth
+            `z`.  Most commonly it is a temperature profile, or a thermal emission profile.
         """
         self.n = n
         self.depth = depth
@@ -427,29 +431,27 @@ class Layer(object):
         self.emissivity = emissivity
         self.profile = profile
 
-
-    def absorption_length(self, wavelength=1.):
+    def absorption_length(self, *args, **kwargs):
         """
         Calculates absorption length
 
-        n: number, refractive index
-        loss_tangent: number, loss tangent
-        wavelength: optional, number or astropy Quantity or array_like number
-            or Quantity, wavelength of observations
+        See `.absorption_coefficient`
         """
-        return 1./self.absorption_coefficient(wavelength=wavelength)
+        return 1./self.absorption_coefficient(*args, **kwargs)
 
-
-    def absorption_coefficient(self, wavelength=1.):
+    def absorption_coefficient(self, wave_freq):
         """
         Calculates absorption coefficient
 
-        n: number, refractive index
-        loss_tangent: number, loss tangent
-        wavelength: optional, number or astropy Quantity or array_like number
-            or Quantity, wavelength of observations
+        wave_freq : number, `astropy.units.Quantity` or array_like
+            Wavelength or frequency of observation
         """
-        return (4*np.pi*self.n)/wavelength*np.power(0.5*(np.power(1+self.loss_tangent*self.loss_tangent,0.5)-1),0.5)
+        if isinstance(wave_freq, u.Quantity):
+            wavelength = wave_freq.to(u.m, equivalencies=u.spectral())
+        else:
+            wavelength = wave_freq
+        c = np.sqrt(1+self.loss_tangent*self.loss_tangent)
+        return (4*np.pi*self.n)/wavelength*np.sqrt((c-1)/(c+1))
 
 
 class Surface(object):
