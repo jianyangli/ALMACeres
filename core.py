@@ -450,16 +450,6 @@ class Snell(object):
                 return Rp
 
 
-# absorption length
-absorption_length = lambda n, loss_tangent, wavelength=1.: wavelength/(4*np.pi*n)*(2./((1+loss_tangent*loss_tangent)**0.5-1))**0.5
-
-# absorption length
-absorption_coefficient = lambda n, loss_tangent, wavelength=1.: 1./absorption_length(n, loss_tangent, wavelength)
-
-# loss tangent
-loss_tangent = lambda n, abs_len, wavelength: ((2*(wavelength/(4*np.pi*n*abs_len))**2+1)**2-1)**0.5
-
-
 class Layer(object):
     """Layer class for calculating propagation of subsurface thermal emission
 
