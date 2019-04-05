@@ -569,7 +569,6 @@ class Layer(object):
         self.n = n
         self.depth = depth
         self.loss_tangent = loss_tangent
-        self.emissivity = emissivity
         self.profile = profile
 
     def absorption_length(self, *args, **kwargs):
@@ -657,7 +656,9 @@ class Surface(object):
             prof = {'t': [], 'intprofile': [], 'zzz': [], 'L0': []}
         for i,l in enumerate(self.layers):
             # integrate in layer `l`
-            inc = Snell(l.n, n0).angle1(emi_ang)
+            snell = Snell(l.n, n0)
+            inc = snell.angle1(emi_ang)
+            ref_coef = snell.reflectance_coefficient(angle2=emi_ang)
             coef = l.absorption_coefficient(wavelength)
             cos_i = np.cos(np.deg2rad(inc))
             if debug:
@@ -679,10 +680,10 @@ class Surface(object):
             from scipy.integrate import quad
             # integral = quad(intfunc, 0, l.depth, epsrel=epsrel)[0]
             integral = (intfunc(zz)[:-1]*(zz[1:]-zz[:-1])).sum()
-            m += coef*integral/cos_i
+            m += (1-ref_coef)*coef*integral/cos_i
             # prepare for the next layer
             L += l.depth/cos_i*coef
-            emi_ang = np.arccos(cos_i)
+            emi_ang = inc
             n0 = l.n
 
         if debug:
