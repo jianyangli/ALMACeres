@@ -419,10 +419,19 @@ def project(metadata, rc=ceres.shape.r.value, saveto=None):
 
 
 class Snell(object):
-    """
-    Implementation of Snell's law of reflection.  In this model, radiation is
-    transmitted from the first media to the second media.  This model
-    calculates the angles of refraction.
+    """Implementation of Snell's law of reflection.
+
+    The initialization takes two refractive indexes, and the default for
+    the refractive index of the second medium is 1.
+
+    >>> s = Snell(1.5)
+    >>> print(s.n1)
+    1.5
+    >>> print(s.n2)
+    1.0
+
+    The methods `.angle1` and `.angle2` calculate the angle in medium 1 and
+    2, respectively, from the angle in the other medium.
     """
 
     def __init__(self, n1, n2=1.):
@@ -432,7 +441,6 @@ class Snell(object):
         """
         self.n1 = n1
         self.n2 = n2
-
 
     @staticmethod
     def refraction_angles(angle, n1, n2):
@@ -454,7 +462,6 @@ class Snell(object):
             a = np.rad2deg(a)
         return a
 
-
     def angle1(self, angle2):
         """
         Calculates the refractive angle in the second media from that in the
@@ -465,7 +472,6 @@ class Snell(object):
             degrees by default.
         """
         return Snell.refraction_angles(angle2, self.n2, self.n1)
-
 
     def angle2(self, angle1):
         """
@@ -478,7 +484,6 @@ class Snell(object):
         """
         return Snell.refraction_angles(angle1, self.n1, self.n2)
 
-
     @property
     def critical_angle(self):
         """Critial angle of reflection"""
@@ -488,6 +493,57 @@ class Snell(object):
             n1, n2 = n2, n1
         return np.rad2deg(np.arcsin(n1/n2))
 
+    @property
+    def brewster_angle(self):
+        """Brewster's angle
+
+        Calculated for light transmiting from medium 1 (n1) to medium 2 (n2)
+        """
+        return np.rad2deg(np.arctan(self.n2/self.n1))
+
+    def reflectance_coefficient(self, angle1=None, angle2=None, pol=None):
+        """Calculate reflectance coefficient
+
+        Parameter
+        ---------
+        angle1 : number, `astropy.units.Quantity`
+            Angle in the 1st medium.  Only one of `angle1` or `angle2` should
+            be passed.  If both passed, then an error will be thrown.
+        angle2 : number, `astropy.units.Quantity`
+            Angle in the 2nd medium.  Only one of `angle1` or `angle2` should
+            be passed.  If both passed, then an error will be thrown.
+        pol : in ['s', 'normal', 'perpendicular', 'p', 'in plane', 'parallel']
+            The polarization state for calculation.
+            ['s', 'normal', 'perpendicular']: normal to plane of incidence
+            ['p', 'in plane', 'parallel']: in the plan of incidence
+            Default will calculate the average of both polarization states
+
+        Return
+        ------
+        Reflection coefficient
+        """
+        if angle1 is not None and angle2 is not None:
+            raise ValueError('ony one angle should be passed')
+        if angle1 is not None:
+            angle2 = self.angle2(angle1)
+        if angle2 is not None:
+            angle1 = self.angle1(angle2)
+        if pol in ['s', 'normal', 'perpendicular', None]:
+            a = self.n1 * np.cos(np.deg2rad(angle1))
+            b = self.n2 * np.cos(np.deg2rad(angle2))
+            Rs = ((a - b)/(a + b))**2
+        if pol in ['p', 'in plane', 'parallel', None]:
+            a = self.n1 * np.cos(np.deg2rad(angle2))
+            b = self.n2 * np.cos(np.deg2rad(angle1))
+            Rp = ((a - b)/(a + b))**2
+        try:
+            return (Rs + Rp)/2
+        except NameError:
+            try:
+                return Rs
+            except NameError:
+                return Rp
+
 
 class Layer(object):
     """Layer class for calculating propagation of subsurface thermal emission
@@ -495,16 +551,20 @@ class Layer(object):
     Based on the models in Keihm & Langseth (1975), Icarus 24, 211-230
     """
 
-    def __init__(self, n, loss_tangent, depth=np.inf, emissivity=1., profile=None):
+    def __init__(self, n, loss_tangent, depth=np.inf, profile=None):
         """
-        n: number, refractive index of this layer
-        loss_tangent: number, loss tengent
-        depth: optional, number, depth of the layer in the same unit as `z`
-            (see below for the description of `profile`)
-        emissivity: optional, number, emissivity
-        profile: optional, callable object, where `profile(z)` returns the
-            physical quantity of the layer at depth `z`.  Most commonly it is a
-            temperature profile, or a thermal emission profile, etc.
+        Parameters
+        ----------
+        n : number
+            Real part of refractive index
+        loss_tangent : number
+            Loss tengent
+        depth : optional, number
+            Depth of the layer in the same unit as `z` (see below for the
+            description of `profile`)
+        profile : optional, callable object
+            `profile(z)` returns the physical quantity of the layer at depth
+            `z`.  Most commonly it is a temperature profile, or a thermal emission profile.
         """
         self.n = n
         self.depth = depth
@@ -512,29 +572,27 @@ class Layer(object):
         self.emissivity = emissivity
         self.profile = profile
 
-
-    def absorption_length(self, wavelength=1.):
+    def absorption_length(self, *args, **kwargs):
         """
         Calculates absorption length
 
-        n: number, refractive index
-        loss_tangent: number, loss tangent
-        wavelength: optional, number or astropy Quantity or array_like number
-            or Quantity, wavelength of observations
+        See `.absorption_coefficient`
         """
-        return 1./self.absorption_coefficient(wavelength=wavelength)
+        return 1./self.absorption_coefficient(*args, **kwargs)
 
-
-    def absorption_coefficient(self, wavelength=1.):
+    def absorption_coefficient(self, wave_freq):
         """
         Calculates absorption coefficient
 
-        n: number, refractive index
-        loss_tangent: number, loss tangent
-        wavelength: optional, number or astropy Quantity or array_like number
-            or Quantity, wavelength of observations
+        wave_freq : number, `astropy.units.Quantity` or array_like
+            Wavelength or frequency of observation
         """
-        return (4*np.pi*self.n)/wavelength*np.power(0.5*(np.power(1+self.loss_tangent*self.loss_tangent,0.5)-1),0.5)
+        if isinstance(wave_freq, u.Quantity):
+            wavelength = wave_freq.to(u.m, equivalencies=u.spectral())
+        else:
+            wavelength = wave_freq
+        c = np.sqrt(1+self.loss_tangent*self.loss_tangent)
+        return (4*np.pi*self.n)/wavelength*np.sqrt((c-1)/(c+1))
 
 
 class Surface(object):
