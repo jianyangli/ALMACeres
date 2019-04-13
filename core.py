@@ -139,7 +139,7 @@ class Ceres(Body):
         else:
             q = True
         equiv = u.dimensionless_angles()
-        xsec = np.pi*((Ceres.ra+Ceres.rb)/(2*dist)).to('arcsec',equivalencies=equiv)*(Ceres.rc/dist).to('arcsec', equivalencies=equiv)
+        xsec = (self.shape.equatorial_cross_section / (dist*dist)).to('arcsec2', equiv)
         if not q:
             xsec = xsec.to('arcsec2').value
         return xsec
