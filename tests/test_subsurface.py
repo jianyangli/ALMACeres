@@ -33,7 +33,7 @@ if __name__ == '__main__':
     # brightness temperature as a function of emissiona angle
     loss = 0.0067   # loss tangent
     wavelength = 10.   # wavelength
-    layer = Layer(n, loss, emissivity=1.0, profile=T)
+    layer = Layer(n, loss, profile=T)
     surf = Surface(layer)
     emi = numpy.linspace(0,90,100)
     Tb = numpy.array([surf.emission(ee, wavelength) for ee in emi])
@@ -59,7 +59,7 @@ if __name__ == '__main__':
     # brightness temperature as a function of wavelength
     loss = 0.0067  # loss tangent
     wavelength = numpy.logspace(-2,3.5,100)  # wavelength
-    layer = Layer(n, loss, emissivity=1.0, profile=T)
+    layer = Layer(n, loss,  profile=T)
     surf = Surface(layer)
     Tb = [surf.emission(0, wavelength=x) for x in wavelength]
     plt.clf()
