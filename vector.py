@@ -13,7 +13,7 @@ History
 '''
 
 import numpy as np
-from jylipy.core import *
+from astropy.table import Table
 
 class Vector(np.ndarray):
     '''Vector object class
