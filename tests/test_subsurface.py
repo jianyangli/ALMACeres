@@ -10,7 +10,7 @@ if __name__ == '__main__':
     from scipy.interpolate import interp1d
     from matplotlib import pyplot as plt
     from matplotlib.backends.backend_pdf import PdfPages
-    from jylipy import pplot
+    #from jylipy import pplot
     import os
 
     workdir = os.path.dirname(__file__)
@@ -24,7 +24,7 @@ if __name__ == '__main__':
     plt.clf()
     z = numpy.linspace(0,500,1000)
     plt.plot(z,T(z))
-    pplot(xlabel='z-depth',ylabel='T * Emissivity')
+    #pplot(xlabel='z-depth',ylabel='T * Emissivity')
     #pdf.savefig()
 
     # optical constants
@@ -39,7 +39,7 @@ if __name__ == '__main__':
     Tb = numpy.array([surf.emission(ee, wavelength) for ee in emi])
     plt.clf()
     plt.plot(emi, Tb)
-    pplot(xlabel='Emission Angle (deg)',ylabel='Tb')
+    #pplot(xlabel='Emission Angle (deg)',ylabel='Tb')
     pdf.savefig()
 
     # brightness temperature as a function of loss tangent
@@ -53,7 +53,7 @@ if __name__ == '__main__':
         leng.append(surf.layers[0].absorption_length(wavelength))
     plt.clf()
     plt.plot(loss, Tb)
-    pplot(xscl='log',xlabel='Loss Tangent',ylabel='Tb')
+    #pplot(xscl='log',xlabel='Loss Tangent',ylabel='Tb')
     pdf.savefig()
 
     # brightness temperature as a function of wavelength
@@ -64,7 +64,7 @@ if __name__ == '__main__':
     Tb = [surf.emission(0, wavelength=x) for x in wavelength]
     plt.clf()
     plt.plot(wavelength, Tb)
-    pplot(xscl='log',xlabel='Wavelength',ylabel='Tb')
+    #pplot(xscl='log',xlabel='Wavelength',ylabel='Tb')
     pdf.savefig()
 
     pdf.close()
@@ -81,7 +81,7 @@ if __name__ == '__main__':
     plt.clf()
     z = numpy.linspace(0,500,1000)
     plt.plot(z,T(z))
-    pplot(xlabel='z-depth',ylabel='T')
+    #pplot(xlabel='z-depth',ylabel='T')
     pdf.savefig()
 
     # wavelength is 1/10 of temperature profile
@@ -102,7 +102,7 @@ if __name__ == '__main__':
         Tb.append(surf.emission(0., wavelength))
     plt.clf()
     plt.plot(Le, Tb)
-    pplot(xlabel='Absorption Length (wavelength)',ylabel='Tb (K, for T$_0$=300 K)',xscl='log',title='n={0}'.format(n))
+    #pplot(xlabel='Absorption Length (wavelength)',ylabel='Tb (K, for T$_0$=300 K)',xscl='log',title='n={0}'.format(n))
     pdf.savefig()
 
     # test effect of refractive index
@@ -119,7 +119,7 @@ if __name__ == '__main__':
     Tb = numpy.array(Tb).T
     plt.clf()
     plt.plot(emi, Tb)
-    pplot(xlabel='Emission Angle (deg)', ylabel='Tb (K)', title=r'$\tan(\Delta)=0.0067$, $\lambda=10$')
+    #pplot(xlabel='Emission Angle (deg)', ylabel='Tb (K)', title=r'$\tan(\Delta)=0.0067$, $\lambda=10$')
     plt.legend([f'n = {i:.2f}' for i in rn])
     pdf.savefig()
 
