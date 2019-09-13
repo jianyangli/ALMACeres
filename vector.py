@@ -1734,3 +1734,20 @@ def xy2iea(*args, **kwargs):
 
     lon,lat = xy2lonlat(*args, **kwargs)
 
+
+def quadeq(a, b, c):
+    '''Solving quadratic equation
+      a * x**2 + b * x + c = 0
+    Returns a `None` for no solution, a numpy array of length 1 for
+    one solution or length 2 for two solutions
+
+    v1.0.0 : JYL @PSI, 2/23/2016
+    '''
+    d = b**2-4*a*c
+    if d < 0:
+        return None
+    elif d == 0:
+        return np.array([-b/(2*a)])
+    else:
+        d = np.sqrt(d)
+        return (-b+d*np.array([-1, 1]))/(2*a)
