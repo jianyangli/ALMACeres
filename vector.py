@@ -14,6 +14,7 @@ History
 
 import numpy as np
 from astropy.table import Table
+from . import utils
 
 class Vector(np.ndarray):
     '''Vector object class
@@ -1476,7 +1477,7 @@ def sphere_vert(r=1., nlon=360, nlat=181):
     '''
     lonstep = 360/nlon
     latstep = 179/(nlat-2)
-    lat, lon = makenxy(-89, 89, nlat-2, 0, 360-lonstep, nlon)
+    lat, lon = utils.makenxy(-89, 89, nlat-2, 0, 360-lonstep, nlon)
     v = Vector(np.ones_like(lat)*r, np.deg2rad(lon), np.deg2rad(lat), type='geo')
     v = insert(v, 0, Vector([0,0,-1.]))
     v = append(v, Vector([0,0,1.])[np.newaxis])
@@ -1568,7 +1569,7 @@ def xy2lonlat(r, viewpt, pxlscl, pa=0., imsz=(1024, 1024), center=None):
         center = np.asarray(center)
 
     # CCD coordinates
-    yarr, xarr = makenxy(-center[0]*pxlscl, (imsz[0]-1-center[0])*pxlscl, imsz[0], -center[1]*pxlscl, (imsz[1]-1-center[1])*pxlscl, imsz[1])
+    yarr, xarr = utils.makenxy(-center[0]*pxlscl, (imsz[0]-1-center[0])*pxlscl, imsz[0], -center[1]*pxlscl, (imsz[1]-1-center[1])*pxlscl, imsz[1])
 
     # set up shape
     sphere = False
@@ -1670,7 +1671,8 @@ def lonlat2xy(lon, lat, r, viewpt, pa=0., center=None, pxlscl=None, deg=True):
     lon = np.asarray(lon).astype(float)
     lat = np.asarray(lat).astype(float)
     if lon.shape != lat.shape:
-        raise ValueError('`lon` and `lat` must have the same shape, {0} {1} received'.format(lon.shape, lat.shape))
+        raise ValueError('`lon` and `lat` must have the same shape, {0} {1}'
+            ' received'.format(lon.shape, lat.shape))
 
     # set up shape
     if hasattr(r, '__iter__'):
@@ -1684,12 +1686,13 @@ def lonlat2xy(lon, lat, r, viewpt, pa=0., center=None, pxlscl=None, deg=True):
         elif len(r) == 3:
             a, b, c = r
         else:
-            raise Warning('`r` has {0} elements, the first three elements define the triaxial ellpsoid shape, others are discarded')
+            raise Warning('`r` has {0} elements, the first three elements'
+                ' define the triaxial ellpsoid shape, others are discarded')
             a, b, c = r[:3]
     else:
         a = r
-        b = a
-        c = a
+        b = r
+        c = r
 
     # calculate projection
     if deg:
