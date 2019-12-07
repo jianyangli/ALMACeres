@@ -274,24 +274,100 @@ def background(filenames, edge=100, box=200, outfile=None):
 
 
 class Beam():
-    def __init__(self, major, minor):
-        """
-        Define beam size
+    """Interferometer beam class
 
-        major, minor: number or astropy Quantity, major and minor axes.
-            Default unit arcsec if not Quantity
+    Attributes
+    ----------
+    fwhm : Full-width half-max
+    fwhm_major : Full-width half-max full major axis
+    fwhm_minor : Full-width half-max full minor axis
+    sigma : Beam sigma
+    sigma_major : Beam sigma in the major axis
+    sigma_minor : Beam sigma in the minor axis
+    pa : Position angle (north to east) of the major axis
+    area : Beam area
+    """
+    @u.quantity_input(pa=u.deg)
+    def __init__(self, fwhm=None, sigma=None, pa=None):
+        """Define beam size
+
+        fwhm : `astropy.units.Quantity` or number, or [major, minor]
+            The full-width half-max.
+        sigma : `astropy.units.Quantity' or number, or [major, minor]
+            The beam sigma.
+        pa : `astropy.units.Quantity` with a unit of angle
+            Position angle of the major axis
+
+        Either `fwhm` or `sigma`, but not both, needs to be specified.
+        Otherwise an `ValueError` will be raised.  If a single value
+        is specified, then the beam is assumed to be circular (major and
+        minor axes are the same).
+
+        No restrictions on the unit of beam size are imposed, and no check on
+        the unit is done.  Caller is responsible for ensuring the physical
+        meaningfulness of the unit.
         """
-        if not isinstance(major, u.Quantity):
-            major = major * u.arcsec
-        self.major = major
-        if not isinstance(minor, u.Quantity):
-            minor = minor * u.arcsec
-        self.minor = minor
+        if (fwhm is None) and (sigma is None):
+            raise ValueError('Beam width is not specified.')
+        if (fwhm is not None) and (sigma is not None):
+            raise ValueError('Only one of `fwhm` or `sigma` can be specified.')
+        if fwhm is not None:
+            try:
+                n = len(fwhm)
+                if n == 1:
+                    self._fwhm = [fwhm[0], fwhm[0]]
+                else:
+                    self._fwhm = fwhm
+            except TypeError:
+                self._fwhm = [fwhm, fwhm]
+        else:
+            try:
+                n = len(sigma)
+                if n == 1:
+                    self._sigma = [sigma[0], sigma[0]]
+                else:
+                    self._sigma = sigma
+            except:
+                self._sigma = [sigma, sigma]
+        if pa is not None:
+            self.pa = pa
+
+    @property
+    def fwhm(self):
+        if hasattr(self, '_fwhm'):
+            return self._fwhm
+        else:
+            return [self._sigma[0] * 2.3548200450309493, \
+                    self._sigma[1] * 2.3548200450309493]
+
+    @property
+    def sigma(self):
+        if hasattr(self, '_sigma'):
+            return self._sigma
+        else:
+            return [self._fwhm[0] * 0.42466090014400953, \
+                    self._fwhm[1] * 0.42466090014400953]
+
+    @property
+    def fwhm_major(self):
+        return self.fwhm[0]
+
+    @property
+    def fwhm_minor(self):
+        return self.fwhm[1]
+
+    @property
+    def sigma_major(self):
+        return self.sigma[0]
+
+    @property
+    def sigma_minor(self):
+        return self.sigma[1]
 
     @property
     def area(self):
-        # returns a Quantity, beam area: pi * bmaj * bmin / (4 * log(2))
-        return np.pi*self.major*self.minor/2.772589
+        """Beam area"""
+        return 2 * np.pi * self.sigma_major * self.sigma_minor
 
 
 def photometry(filenames, centers, rapt=100, outfile=None):
@@ -321,7 +397,7 @@ def photometry(filenames, centers, rapt=100, outfile=None):
         im,hdr = utils.readfits(f,verbose=False,header=True)
         im = np.squeeze(im)
         sz = im.shape
-        bm = Beam(hdr['BMAJ']*u.deg,hdr['BMIN']*u.deg).area.to('arcsec2').value
+        bm = Beam([hdr['BMAJ']*u.deg,hdr['BMIN']*u.deg]).area.to('arcsec2').value
         bms.append(bm)
         apt = phot.CircularAperture(c,r)
         ftot = utils.apphot(im, apt)['aperture_sum'][0]
@@ -392,7 +468,7 @@ def project(metadata, rc=ceres.shape.r.value, saveto=None):
     fname = path.join(metadata.path, metadata.name)
     im = utils.readfits(fname, verbose=False)
     im = np.squeeze(im)
-    im /= Beam(metadata.bmaj*u.mas,metadata.bmin*u.mas).area.to('arcsec2').value  # in Jy/arcsec**2
+    im /= Beam([metadata.bmaj*u.mas,metadata.bmin*u.mas]).area.to('arcsec2').value  # in Jy/arcsec**2
 
     # project to (lon, lat)
     lat,lon = utils.makenxy(-90,90,91,0,358,180)
