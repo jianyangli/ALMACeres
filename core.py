@@ -9,6 +9,9 @@ from astropy import table, time
 from astropy.io import fits
 import astropy.units as u
 import astropy.constants as const
+from astropy.io import fits
+from astropy.coordinates import SkyCoord
+from astropy.wcs import WCS
 import spiceypy as spice
 from . import utils
 from . import saoimage
@@ -181,6 +184,164 @@ class ALMACeresImageMetaData(utils.MetaData):
         if spicekernel is not None:
             dummy = [spice.unload(k) for k in spicekernel]
         return sub
+
+
+class ALMAImage(u.Quantity):
+    """ALMA image class"""
+    def __new__(cls, input_array, meta=None, **kwargs):
+        obj = u.Quantity(input_array, **kwargs).view(cls)
+        obj.meta = meta
+        return obj
+
+    def __array_finalize__(self, obj):
+        super().__array_finalize__(obj)
+        if obj is None: return
+        self.meta = getattr(obj, 'meta', None)
+
+    @classmethod
+    def from_fits(cls, filename):
+        """Initialize class from FITS file"""
+        im = fits.open(filename)
+        hdr = im[0].header
+        data = im[0].data * u.Unit(hdr['BUNIT'])
+        info = {}
+        info['file'] = filename
+        info['object'] = hdr['OBJECT'].strip()
+        info['beam'] = Beam(fwhm=[hdr['BMAJ'], hdr['BMIN']]*u.deg,
+                            pa=hdr['BPA']*u.deg)
+        info['date_obs'] = time.Time(hdr['DATE-OBS'])
+        info['position'] = SkyCoord(ra=hdr['OBSRA']*u.deg,
+                                    dec=hdr['OBSDEC']*u.deg)
+        info['wcs'] = WCS(hdr)
+        info['xscl'] = abs(hdr['cdelt1']*u.deg)
+        info['yscl'] = abs(hdr['cdelt2']*u.deg)
+        return cls(data, meta=info)
+
+    def set_obstime(self, utc_start, utc_stop):
+        """Set utc_start and utc_stop times"""
+        self.meta['utc_start'] = time.Time(utc_start)
+        self.meta['utc_stop'] = time.Time(utc_stop)
+        self.meta['utc_mid'] = self.meta['utc_start'] + \
+                (self.meta['utc_stop'] - self.meta['utc_start']) / 2
+
+    def calc_geometry(self, metakernel=None):
+        """Calculate the observing and illumination geometry
+        """
+        if metakernel is not None:
+            spice.furnsh(metakernel)
+        if 'utc_mid' in self.meta.keys():
+            ut = self.meta['utc_mid'].isot
+        else:
+            ut = self.meta['date_obs'].isot
+        target = self.meta['object']
+        self.meta['geom'] = utils.subcoord(ut, target)
+        if metakernel is not None:
+            spice.unload(metakernel)
+
+    def display(self, ds9=None, **kwargs):
+        """Display image in DS9"""
+        pass
+
+
+class ALMACeresImage(ALMAImage):
+
+    ceres = Ceres()
+
+    def centroid(self, box=None, method=1):
+        """Find the centroid of Ceres"""
+        if box is None:
+            angular_dia = self.ceres.shape.a / self.meta['geom']['Range']
+            angular_x = (angular_dia / self.meta['xscl']).to('',
+                                equivalencies=u.dimensionless_angles()).value
+            angular_y = (angular_dia / self.meta['yscl']).to('',
+                                equivalencies=u.dimensionless_angles()).value
+            box = max([angular_x, angular_y]) * 4
+        self.meta['center'] = utils.centroid(self, method=method, box=box)
+
+    def project(self, return_all=False):
+        """Project the image into lon-lat projection
+        """
+        if ('yc' not in self.meta.keys()) or ('xc' not in self.meta.keys()):
+            self.centroid()
+
+        lat, lon = utils.makenxy(-90,90,91,0,358,180)
+        vpt = vector.Vector(1., self.meta['geom']['SOLon'][0],
+                            self.meta['geom']['SOLat'][0], type='geo',
+                            deg=True)
+        pxlscl = (self.meta['geom']['Range'] * self.meta['xscl']).to('km',
+                 equivalencies=u.dimensionless_angles()).value
+        center = self.meta['center']
+        x, y = vector.lonlat2xy(lon, lat, self.ceres.shape.r.to('km').value,
+                                vpt, pa=self.meta['geom']['PolePA'],
+                                center=center, pxlscl=pxlscl)
+        w = np.isfinite(x) & np.isfinite(y)
+        b = u.Quantity(np.zeros_like(x), unit=self.unit)
+        b[w] = self[np.round(y[w]).astype(int), np.round(x[w]).astype(int)]
+        b = LonLatProjection.from_array(b)
+
+        if return_all:
+            # calculate local solar time
+            lst = ((lon - self.meta['geom']['SSLon']) / 15 + 12) % 24 * u.hour
+            lst = LonLatProjection.from_array(lst)
+
+            # calculate emission angle
+            latlon_vec = vector.Vector(np.ones_like(lon), lon, lat, type='geo',
+                                       deg=True)
+            subsolar_vec = vector.Vector(1, self.meta['geom']['SOLon'][0],
+                                         self.meta['geom']['SOLat'][0],
+                                         type='geo', deg=True)
+            emi = latlon_vec.vsep(subsolar_vec) * u.deg
+            emi = LonLatProjection.from_array(emi)
+
+            return b, lst, emi
+        else:
+            return b
+
+
+class LonLatProjection(u.Quantity):
+    """Longitude-Latitude projection class
+    """
+    def __new__(cls, input_array, meta=None, **kwargs):
+        obj = u.Quantity(input_array, **kwargs).view(cls)
+        obj.meta = meta
+        return obj
+
+    def __array_finalize__(self, obj):
+        super().__array_finalize__(obj)
+        if obj is None: return
+        self.meta = getattr(obj, 'meta', None)
+
+    @classmethod
+    def from_array(cls, input_array, lonlim=[0, 360], latlim=[-90, 90]):
+        """Initialize class from an array or a `astropy.units.Quantity`"""
+        input_array = np.asanyarray(input_array)
+        info = {}
+        info['lonlim'] = lonlim
+        info['latlim'] = latlim
+        return cls(input_array, meta=info)
+
+    def to_fits(self, filename=None, append=True, overwrite=False):
+        """Save projection to FITS file"""
+        hdu = fits.ImageHDU(np.asarray(self))
+        if self.unit is not None
+            hdu.header['bunit'] = self.unit
+        hdu.header['lonmin'] = self.meta['lonlim'][0]
+        hdu.header['lonmax'] = self.meta['lonlim'][1]
+        hdu.header['latmin'] = self.meta['latlim'][0]
+        hdu.header['latmax'] = self.meta['latlim'][1]
+        out = fits.HDUList([hdu])
+        if filenames is not None:
+            from os.path import isfile
+            if append:
+                overwrite = True
+                if isfile(filename):
+                    hdulist = fits.open(filename)
+                else:
+                    hdulist = fits.HDUList()
+            else:
+                hdulist = fits.HDUList()
+            hdulist.append(hdu)
+            hdulist.writeto(filename, overwrite=overwrite)
 
 
 def aspect(filenames, utc1, utc2, outfile=None, spicekernel=None, **kwargs):
