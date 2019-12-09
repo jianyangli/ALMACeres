@@ -293,7 +293,11 @@ class ALMACeresImage(ALMAImage):
             emi = latlon_vec.vsep(subsolar_vec) * u.deg
             emi = LonLatProjection.from_array(emi)
 
-            return b, lst, emi
+            # lat and lon array
+            lat = LonLatProjection.from_array(lat)
+            lon = LonLatProjection.from_array(lon)
+
+            return b, lst, emi, lat, lon
         else:
             return b
 
