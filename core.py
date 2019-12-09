@@ -403,12 +403,12 @@ class LonLatProjection(u.Quantity):
         """
         hdu = fits.ImageHDU(np.asarray(self))
         if self.unit is not None:
-            hdu.header['bunit'] = self.unit
+            hdu.header['bunit'] = str(self.unit)
         hdu.header['lonmin'] = self.meta['lonlim'][0]
         hdu.header['lonmax'] = self.meta['lonlim'][1]
         hdu.header['latmin'] = self.meta['latlim'][0]
         hdu.header['latmax'] = self.meta['latlim'][1]
-        if filenames is not None:
+        if filename is not None:
             from os.path import isfile
             if append:
                 overwrite = True
