@@ -321,7 +321,21 @@ class LonLatProjection(u.Quantity):
         return cls(input_array, meta=info)
 
     def to_fits(self, filename=None, append=True, overwrite=False):
-        """Save projection to FITS file"""
+        """Save projection to FITS file
+
+        Parameters
+        ----------
+        filename : str, optional
+            File name to save the FITS
+        append : bool, optional
+            Append to existing FITS file
+        overwrite : bool, optional
+            Overwrite existing FITS file
+
+        Return
+        ------
+        `astropy.io.fits.ImageHDU`
+        """
         hdu = fits.ImageHDU(np.asarray(self))
         if self.unit is not None
             hdu.header['bunit'] = self.unit
@@ -329,7 +343,6 @@ class LonLatProjection(u.Quantity):
         hdu.header['lonmax'] = self.meta['lonlim'][1]
         hdu.header['latmin'] = self.meta['latlim'][0]
         hdu.header['latmax'] = self.meta['latlim'][1]
-        out = fits.HDUList([hdu])
         if filenames is not None:
             from os.path import isfile
             if append:
@@ -342,6 +355,7 @@ class LonLatProjection(u.Quantity):
                 hdulist = fits.HDUList()
             hdulist.append(hdu)
             hdulist.writeto(filename, overwrite=overwrite)
+        return hdu
 
 
 def aspect(filenames, utc1, utc2, outfile=None, spicekernel=None, **kwargs):
