@@ -242,6 +242,40 @@ class ALMAImage(u.Quantity):
         """Display image in DS9"""
         pass
 
+    def get_meta(self, keys=None, wcs=False):
+        meta = self.meta.copy()
+        w = meta.pop('wcs', None)
+        if 'wcs' in keys:
+            keys.remove('wcs')
+        if keys is None:
+            keys = list(meta.keys())
+        if 'skycoord' in keys:
+            coord = meta.pop('skycoord', None)
+            keys.remove('skycoord')
+        else:
+            coord = None
+        if 'beam' in keys:
+            beam = meta.pop('beam', None)
+            keys.remove('beam')
+        else:
+            beam = None
+        from .utils import MetaData
+        out = MetaData()
+        for k in keys:
+            setattr(out, k, meta[k])
+        if coord is not None:
+            setattr(out, 'ra', coord.ra)
+            setattr(out, 'dec', coord.dec)
+        if beam is not None:
+            setattr(out, 'major', beam.fwhm_major)
+            setattr(out, 'minor', beam.fwhm_minor)
+            setattr(out, 'pa', beam.pa)
+            setattr(out, 'beam_area', beam.area)
+        if wcs:
+            for k, v in w.to_header().items():
+                setattr(out, k, v)
+        return out
+
 
 class ALMACeresImage(ALMAImage):
 
@@ -300,6 +334,33 @@ class ALMACeresImage(ALMAImage):
             return b, lst, emi, lat, lon
         else:
             return b
+
+    def get_meta(self, keys=None):
+        meta = self.meta.copy()
+        if keys is None:
+            keys = list(self.meta.keys())
+        if 'center' in keys:
+            center = meta['center']
+            keys.remove('center')
+        else:
+            center = None
+        if 'geom' in keys:
+            geom = meta['geom']
+            keys.remove('geom')
+        else:
+            geom = None
+        out = super().get_meta(keys=keys)
+        if center is not None:
+            setattr(out, 'cx', center[1])
+            setattr(out, 'cy', center[0])
+        if geom is not None:
+            for k in geom.keys():
+                d = geom[k].data[0]
+                u = geom[k].unit
+                if u is not None:
+                    d = d*u
+                setattr(out, k, d)
+        return out
 
 
 class LonLatProjection(u.Quantity):
