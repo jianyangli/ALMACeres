@@ -341,7 +341,7 @@ class LonLatProjection(u.Quantity):
         `astropy.io.fits.ImageHDU`
         """
         hdu = fits.ImageHDU(np.asarray(self))
-        if self.unit is not None
+        if self.unit is not None:
             hdu.header['bunit'] = self.unit
         hdu.header['lonmin'] = self.meta['lonlim'][0]
         hdu.header['lonmax'] = self.meta['lonlim'][1]
