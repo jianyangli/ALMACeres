@@ -246,9 +246,40 @@ class ALMAImage(u.Quantity):
         if metakernel is not None:
             spice.unload(metakernel)
 
-    def display(self, ds9=None, **kwargs):
-        """Display image in DS9"""
-        pass
+    def disp(self, ds9=None, **kwargs):
+        """Display image in DS9
+
+        Parameters
+        ----------
+        ds9 : `saoimage.DS9`, optional
+            DS9 window to display the image.  If `None`, then a new DS9 window
+            will be opened.
+        kwargs : dict
+            Keyword arguments for `saoimage.Region`.  This can be used to set
+            the properties of beam ellipse, such as color and width.
+        """
+        if ds9 is None:
+            ds9=saoimage.getds9()
+        # beam parameter
+        bmaj = (self.meta['beam'].fwhm_major/self.meta['xscl']).to('').value
+        bmin = (self.meta['beam'].fwhm_minor/self.meta['xscl']).to('').value
+        bpa = self.meta['beam'].pa.to('deg').value
+        # display parameter
+        sy, sx = self.shape
+        w = int(ds9.get('width'))
+        h = int(ds9.get('height'))
+        z = float(ds9.get('zoom'))
+        p = np.array([float(x) for x in ds9.get('pan').split()]) - 1
+        orig = p - np.array([w/2, h/2])/z
+        # generate beam marker
+        bct = np.array([20, 20]) + bmaj*2*z
+        bx, by = bct/z + orig
+        bx = np.clip(bx, p[0]-w/2/z, p[0])
+        by = np.clip(by, p[1]-h/2/z, p[1])
+        beam = saoimage.EllipseRegion(bx, by, bmaj, bmin, bpa, **kwargs)
+        # display image and show beam marker
+        ds9.imdisp(self)
+        beam.show(ds9)
 
     def get_meta(self, keys=None, wcs=False):
         meta = self.meta.copy()
