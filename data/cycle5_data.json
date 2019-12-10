@@ -1,6 +1,6 @@
 {
     "datadir": "/Users/jyli/Work/Ceres/ALMA/Data/Cycle5/12m_Processed/",
-    "imgfiles": [
+    "files": [
         "ceres_startmodel_multiscaleG_phasecal1_1_2_3.fits",
         "ceres_startmodel_multiscaleG_phasecal1_4_5_6.fits",
         "ceres_startmodel_multiscaleG_phasecal1_7_8_9.fits",
