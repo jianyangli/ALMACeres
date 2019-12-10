@@ -817,6 +817,30 @@ def centroid(im, center=None, error=None, mask=None, method=0, box=6, tol=0.01, 
     return center
 
 
+def geometric_center(image, threshold, mask=None):
+    '''Returns the geometric center of an image for values above a
+    threshold
+
+    image : array_like
+      The 2D data array.
+
+    threshold : number
+      The threshold of image above background.
+
+    mask : array_like(bool), optional
+      A boolean mask, with the same shape as `data`, where `True` value
+      indicates the corresponding element of `data` is masked.
+
+    Returns: `center`: array of length 2, the `x, y` coordinates
+    '''
+    sz = image.shape
+    y, x = makenxy(0, sz[0]-1, sz[0], 0, sz[1]-1, sz[1])
+    im_mask = np.asanyarray(image) > threshold
+    if mask is not None:
+        im_mask |= mask
+    yin, xin = y[im_mask], x[im_mask]
+    return xin.mean(), yin.mean()
+
 
 import pyds9
 class DS9(pyds9.DS9):

@@ -319,22 +319,31 @@ class ALMACeresImage(ALMAImage):
 
     ceres = Ceres()
 
-    def centroid(self, box=None, method=1):
+    def centroid(self, box=None, method=1, **kwargs):
         """Find the centroid of Ceres"""
         if box is None:
-            angular_dia = self.ceres.shape.a / self.meta['geom']['Range']
-            angular_x = (angular_dia / self.meta['xscl']).to('',
+            if 'geom' in self.meta.keys():
+                angular_dia = self.ceres.shape.a / self.meta['geom']['Range']
+                angular_x = (angular_dia / self.meta['xscl']).to('',
                                 equivalencies=u.dimensionless_angles()).value
-            angular_y = (angular_dia / self.meta['yscl']).to('',
+                angular_y = (angular_dia / self.meta['yscl']).to('',
                                 equivalencies=u.dimensionless_angles()).value
-            box = max([angular_x, angular_y]) * 4
-        self.meta['center'] = utils.centroid(self, method=method, box=box)
+                box = max([angular_x, angular_y]) * 4
+            else:
+                box = min(self.shape)/2.1
+        if (method == 2) and ('threshold' not in kwargs.keys()):
+            _, std = utils.resmean(self, std=True)
+            threshold = std*5
+            kwargs['threshold'] = threshold
+        self.meta['center'] = utils.centroid(self, method=method, box=box,
+                                             **kwargs)
 
     def project(self, return_all=False):
         """Project the image into lon-lat projection
         """
-        if ('yc' not in self.meta.keys()) or ('xc' not in self.meta.keys()):
-            self.centroid()
+        if 'center' not in self.meta.keys():
+            raise ValueError('Centroid not found.  Please run '
+                             '`self.centroid` first.')
 
         lat, lon = utils.makenxy(-90,90,91,0,358,180)
         vpt = vector.Vector(1., self.meta['geom']['SOLon'][0],
