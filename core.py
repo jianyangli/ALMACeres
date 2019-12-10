@@ -260,6 +260,7 @@ class ALMAImage(u.Quantity):
         """
         if ds9 is None:
             ds9=saoimage.getds9()
+        ds9.imdisp(self)
         # beam parameter
         bmaj = (self.meta['beam'].fwhm_major/self.meta['xscl']).to('').value
         bmin = (self.meta['beam'].fwhm_minor/self.meta['xscl']).to('').value
@@ -277,8 +278,6 @@ class ALMAImage(u.Quantity):
         bx = np.clip(bx, p[0]-w/2/z, p[0])
         by = np.clip(by, p[1]-h/2/z, p[1])
         beam = saoimage.EllipseRegion(bx, by, bmaj, bmin, bpa, **kwargs)
-        # display image and show beam marker
-        ds9.imdisp(self)
         beam.show(ds9)
 
     def get_meta(self, keys=None, wcs=False):
