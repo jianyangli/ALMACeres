@@ -187,7 +187,14 @@ class ALMACeresImageMetaData(utils.MetaData):
 
 
 class ALMAImage(u.Quantity):
-    """ALMA image class"""
+    """ALMA image class
+
+    This is a subclass of `astropy.units.Quantity`, which subclasses
+    `np.ndarray`.  In addition to all the `u.Quantity` attributes, it
+    also contains a `.meta` attribute to store all the information
+    related to ALMA images.  WCS can also be stored in `.meta['wcs']`
+    if available.
+    """
     def __new__(cls, input_array, meta=None, **kwargs):
         obj = u.Quantity(input_array, **kwargs).view(cls)
         obj.meta = meta
@@ -200,7 +207,21 @@ class ALMAImage(u.Quantity):
 
     @classmethod
     def from_fits(cls, filename, wcs_kwargs={}, skycoord_kwargs={}):
-        """Initialize class from FITS file"""
+        """Initialize class from FITS file
+
+        Parameters
+        ----------
+        filename : str or `astropy.io.fits.HDUList`
+            Input FITS file or object
+        wcs_kwargs : dict, optional
+            Keywords to be passed to `astropy.wcs.WCS()`
+        skycoord_kwargs : dict, optional
+            Keywords to be passed to `astropy.coordinates.SkyCoord()`
+
+        Return
+        ------
+        `ALMAImage` object
+        """
         if isinstance(filename, str):
             im = fits.open(filename)
         elif isinstance(filename, fits.HDUList):
@@ -225,15 +246,17 @@ class ALMAImage(u.Quantity):
         info['yscl'] = abs(hdr['cdelt2']*u.deg)
         return cls(data, meta=info)
 
-    def set_obstime(self, utc_start, utc_stop):
-        """Set utc_start and utc_stop times"""
-        self.meta['utc_start'] = time.Time(utc_start)
-        self.meta['utc_stop'] = time.Time(utc_stop)
-        self.meta['utc_mid'] = self.meta['utc_start'] + \
-                (self.meta['utc_stop'] - self.meta['utc_start']) / 2
-
     def calc_geometry(self, metakernel=None):
         """Calculate the observing and illumination geometry
+
+        Parameters
+        ----------
+        metakernel : str
+            NAIF SPICE meta kernel to be loaded
+
+        The target is from `.meta['object']`.  The calculation of geometry
+        uses SPICE kernels specified by `metakernel` or preloaded before
+        function call.
         """
         if metakernel is not None:
             spice.furnsh(metakernel)
@@ -281,12 +304,27 @@ class ALMAImage(u.Quantity):
         beam.show(ds9)
 
     def get_meta(self, keys=None, wcs=False):
+        """Return meta data contained in the object
+
+        Parameters
+        ----------
+        keys : list of str, optional
+            List of meta data keys to be returned.  If `None`, all keys
+            except for `'wcs'` are returned.
+        wcs : bool, optional
+            If `True`, return all WCS keys.
+
+        Returns
+        -------
+        dict : `utils.MetaData`
+            Meta data items contained in the object
+        """
         meta = self.meta.copy()
         w = meta.pop('wcs', None)
-        if 'wcs' in keys:
-            keys.remove('wcs')
         if keys is None:
             keys = list(meta.keys())
+        if 'wcs' in keys:
+            keys.remove('wcs')
         if 'skycoord' in keys:
             coord = meta.pop('skycoord', None)
             keys.remove('skycoord')
@@ -297,6 +335,11 @@ class ALMAImage(u.Quantity):
             keys.remove('beam')
         else:
             beam = None
+        if 'geom' in keys:
+            geom = meta['geom']
+            keys.remove('geom')
+        else:
+            geom = None
         from .utils import MetaData
         out = MetaData()
         for k in keys:
@@ -309,6 +352,13 @@ class ALMAImage(u.Quantity):
             setattr(out, 'bmin', beam.fwhm_minor)
             setattr(out, 'bpa', beam.pa)
             setattr(out, 'barea', beam.area)
+        if geom is not None:
+            for k in geom.keys():
+                d = geom[k].data[0]
+                u = geom[k].unit
+                if u is not None:
+                    d = d*u
+                setattr(out, k, d)
         if wcs:
             for k, v in w.to_header().items():
                 setattr(out, k, v)
@@ -316,11 +366,26 @@ class ALMAImage(u.Quantity):
 
 
 class ALMACeresImage(ALMAImage):
+    """Subclass of `ALMAImages` for specific functionalities of Ceres images
+    """
 
     ceres = Ceres()
 
     def centroid(self, box=None, method=1, **kwargs):
-        """Find the centroid of Ceres"""
+        """Find the centroid of Ceres
+
+        Parameters
+        ----------
+        box : number, optional
+            Box size to measure centroid.  Default is half of the shorter
+            dimension of the image.
+        method : [0, 1, 2], optional
+            Specify the method to measure centroid.  See `utils.centroid`.
+        kwargs : dict, optional
+            Other keywords accepted by `utils.centroid`.
+
+        Method sets `.meta['center'] = cy, cx`.
+        """
         if box is None:
             if 'geom' in self.meta.keys():
                 angular_dia = self.ceres.shape.a / self.meta['geom']['Range']
@@ -337,9 +402,34 @@ class ALMACeresImage(ALMAImage):
             kwargs['threshold'] = threshold
         self.meta['center'] = utils.centroid(self, method=method, box=box,
                                              **kwargs)
+    def set_obstime(self, utc_start, utc_stop):
+        """Set utc_start and utc_stop times.
+
+        The start and stop UTC of each images are usually provided separately
+        based on the processing of each image.
+        """
+        self.meta['utc_start'] = time.Time(utc_start)
+        self.meta['utc_stop'] = time.Time(utc_stop)
+        self.meta['utc_mid'] = self.meta['utc_start'] + \
+                (self.meta['utc_stop'] - self.meta['utc_start']) / 2
 
     def project(self, return_all=False):
         """Project the image into lon-lat projection
+
+        Parameters
+        ----------
+        return_all : bool, optional
+            If `True`, returns all relevant projections
+
+        Returns
+        -------
+        b, or tuple (b, lst, emi, lat, lon)
+        All returned variables are `LonLatProjection`
+        b : Projected image
+        lst : Local solar time
+        emi : Emission angle
+        lat : Latitude
+        lon : Longitude
         """
         if 'center' not in self.meta.keys():
             raise ValueError('Centroid not found.  Please run '
@@ -382,7 +472,12 @@ class ALMACeresImage(ALMAImage):
         else:
             return b
 
-    def get_meta(self, keys=None):
+    def get_meta(self, keys=None, wcs=False):
+        """Return meta data contained in the object.
+
+        See `ALMAImage.get_meta`.  This function adds `.meta['center']` key
+        to the output list.
+        """
         meta = self.meta.copy()
         if keys is None:
             keys = list(self.meta.keys())
@@ -391,22 +486,10 @@ class ALMACeresImage(ALMAImage):
             keys.remove('center')
         else:
             center = None
-        if 'geom' in keys:
-            geom = meta['geom']
-            keys.remove('geom')
-        else:
-            geom = None
-        out = super().get_meta(keys=keys)
+        out = super().get_meta(keys=keys, wcs=wcs)
         if center is not None:
             setattr(out, 'cx', center[1])
             setattr(out, 'cy', center[0])
-        if geom is not None:
-            for k in geom.keys():
-                d = geom[k].data[0]
-                u = geom[k].unit
-                if u is not None:
-                    d = d*u
-                setattr(out, k, d)
         return out
 
 
@@ -477,6 +560,29 @@ class LonLatProjection(u.Quantity):
         return hdu
 
     def concatenate(self, proj, ignore_unit=False, equivalencies=None, axis=0):
+        """Concatenate another `LonLatProjection` or array-like
+
+        proj : `LonLatProjection`, array-like
+            Array to be concatenated
+        ignore_unit : bool, optional
+            If `True`, ignore unit of `proj` if incompatible with `self`
+        equivalencies : list
+            List of equivalencies to suppoert unit conversion of `proj` before
+            concatenate.
+        axis : int, optional
+            Axis to be concatenated.  See `numpy.concatenate`.
+
+        Return
+        ------
+        Concatenated array or object
+
+        Note
+        ----
+        Concatenation follows all the rules of `numpy.concatenate`.  This
+        method checks and tries to convert unit of `proj` before concatenation.
+        If unit is incompatible, unless `ignore_unit is True`, a `ValueError`
+        will be raised.  `self.meta` will be copied to output.
+        """
         if isinstance(proj, LonLatProjection) and hasattr(proj, 'meta'):
             if (('lonlim' in proj.meta.keys()) and \
                               (self.meta['lonlim'] != proj.meta['lonlim'])) \
