@@ -5,7 +5,8 @@ import numpy as np
 import numbers, inspect, json
 from os import path
 from astropy.io import fits
-from astropy import units, table, nddata
+from astropy import units, table, nddata, time
+import astropy.units as u
 import spiceypy as spice
 from .vector import vecsep, sph2xyz
 
@@ -627,6 +628,19 @@ class MetaDataList(list):
         """
         indent = kwargs.pop('indent', 4)
         out = [obj2dict(m) for m in self]
+        for x in out:
+            for k in x.keys():
+                if isinstance(x[k], tuple(np.typeDict[k] for k in \
+                                            np.typeDict.keys())):
+                    pass
+                elif isinstance(x[k], str):
+                    pass
+                elif isinstance(x[k], u.Quantity):
+                    x[k] = x[k].value
+                elif isinstance(x[k], time.Time):
+                    x[k] = x[k].utc.isot
+                else:
+                    x[k] = 'Not JSON serializable'
         if saveto is not None:
             with open(saveto, 'w') as f:
                 json.dump(out, f, indent=indent, **kwargs)
@@ -643,6 +657,14 @@ class MetaDataList(list):
         out = {}
         for k in obj2dict(self[0]).keys():
             out[k] = [getattr(m, k) for m in self]
+            if isinstance(out[k][0], u.Quantity):
+                out[k] = u.Quantity(out[k])
+            elif isinstance(out[k][0], np.str_):
+                out[k] = [str(x) for x in out[k]]
+            elif isinstance(out[k][0], time.Time):
+                out[k] = [x.utc.isot for x in out[k]]
+            elif isinstance(out[k][0], list):
+                out[k] = ['object'] * len(out[k])
         out = table.Table(out)
         if saveto is not None:
             out.write(saveto, overwrite=overwrite)

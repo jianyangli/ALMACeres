@@ -199,9 +199,14 @@ class ALMAImage(u.Quantity):
         self.meta = getattr(obj, 'meta', None)
 
     @classmethod
-    def from_fits(cls, filename):
+    def from_fits(cls, filename, wcs_kwargs={}, skycoord_kwargs={}):
         """Initialize class from FITS file"""
-        im = fits.open(filename)
+        if isinstance(filename, str):
+            im = fits.open(filename)
+        elif isinstance(filename, fits.HDUList):
+            im = filename
+        else:
+            raise TypeError('Unrecogniazed input `filename`.')
         hdr = im[0].header
         data = im[0].data * u.Unit(hdr['BUNIT'])
         info = {}
@@ -209,10 +214,13 @@ class ALMAImage(u.Quantity):
         info['object'] = hdr['OBJECT'].strip()
         info['beam'] = Beam(fwhm=[hdr['BMAJ'], hdr['BMIN']]*u.deg,
                             pa=hdr['BPA']*u.deg)
+        info['frequency'] = hdr['RESTFRQ']*u.Hz
         info['date_obs'] = time.Time(hdr['DATE-OBS'])
-        info['position'] = SkyCoord(ra=hdr['OBSRA']*u.deg,
-                                    dec=hdr['OBSDEC']*u.deg)
-        info['wcs'] = WCS(hdr)
+        info['skycoord'] = SkyCoord(ra=hdr['OBSRA']*u.deg,
+                                    dec=hdr['OBSDEC']*u.deg,
+                                    frame=hdr['RADESYS'].lower(),
+                                    **skycoord_kwargs)
+        info['wcs'] = WCS(hdr, **wcs_kwargs)
         info['xscl'] = abs(hdr['cdelt1']*u.deg)
         info['yscl'] = abs(hdr['cdelt2']*u.deg)
         return cls(data, meta=info)
@@ -267,10 +275,10 @@ class ALMAImage(u.Quantity):
             setattr(out, 'ra', coord.ra)
             setattr(out, 'dec', coord.dec)
         if beam is not None:
-            setattr(out, 'major', beam.fwhm_major)
-            setattr(out, 'minor', beam.fwhm_minor)
-            setattr(out, 'pa', beam.pa)
-            setattr(out, 'beam_area', beam.area)
+            setattr(out, 'bmaj', beam.fwhm_major)
+            setattr(out, 'bmin', beam.fwhm_minor)
+            setattr(out, 'bpa', beam.pa)
+            setattr(out, 'barea', beam.area)
         if wcs:
             for k, v in w.to_header().items():
                 setattr(out, k, v)
@@ -328,8 +336,8 @@ class ALMACeresImage(ALMAImage):
             emi = LonLatProjection.from_array(emi)
 
             # lat and lon array
-            lat = LonLatProjection.from_array(lat)
-            lon = LonLatProjection.from_array(lon)
+            lat = LonLatProjection.from_array(lat*u.deg)
+            lon = LonLatProjection.from_array(lon*u.deg)
 
             return b, lst, emi, lat, lon
         else:
@@ -377,15 +385,20 @@ class LonLatProjection(u.Quantity):
         self.meta = getattr(obj, 'meta', None)
 
     @classmethod
-    def from_array(cls, input_array, lonlim=[0, 360], latlim=[-90, 90]):
+    def from_array(cls, input_array, lonlim=[0, 360], latlim=[-90, 90], **kwargs):
         """Initialize class from an array or a `astropy.units.Quantity`"""
         input_array = np.asanyarray(input_array)
         info = {}
         info['lonlim'] = lonlim
         info['latlim'] = latlim
-        return cls(input_array, meta=info)
+        if len(input_array.shape) == 2:
+            info['nband'] = 1
+        else:
+            info['nband'] = input_array.shape[0]
+        return cls(input_array, meta=info, **kwargs)
 
-    def to_fits(self, filename=None, append=True, overwrite=False):
+    def to_fits(self, filename=None, extname=None, append=False,
+                overwrite=False):
         """Save projection to FITS file
 
         Parameters
@@ -402,7 +415,7 @@ class LonLatProjection(u.Quantity):
         `astropy.io.fits.ImageHDU`
         """
         hdu = fits.ImageHDU(np.asarray(self))
-        if self.unit is not None:
+        if (self.unit is not None) and (str(self.unit) != ''):
             hdu.header['bunit'] = str(self.unit)
         hdu.header['lonmin'] = self.meta['lonlim'][0]
         hdu.header['lonmax'] = self.meta['lonlim'][1]
@@ -412,6 +425,8 @@ class LonLatProjection(u.Quantity):
             from os.path import isfile
             if append:
                 overwrite = True
+                if extname is not None:
+                    hdu.header['EXTNAME'] = extname
                 if isfile(filename):
                     hdulist = fits.open(filename)
                 else:
@@ -421,6 +436,27 @@ class LonLatProjection(u.Quantity):
             hdulist.append(hdu)
             hdulist.writeto(filename, overwrite=overwrite)
         return hdu
+
+    def concatenate(self, proj, ignore_unit=False, equivalencies=None, axis=0):
+        if isinstance(proj, LonLatProjection) and hasattr(proj, 'meta'):
+            if (('lonlim' in proj.meta.keys()) and \
+                              (self.meta['lonlim'] != proj.meta['lonlim'])) \
+                or (('latlim' in proj.meta.keys()) and \
+                              (self.meta['latlim'] != proj.meta['latlim'])):
+                    raise ValueError('Cannot concatenate with a projection'
+                                     ' with different lon-lat limit.')
+        if (hasattr(proj, 'unit') and (self.unit != proj.unit)):
+            try:
+                proj = proj.to(self.unit, equivalencies=equivalencies)
+            except u.UnitConversionError:
+                if not ignore_unit:
+                    raise ValueError('Incompatible unit for concatenation.')
+        p1 = np.asarray(self)
+        p2 = np.asarray(proj)
+        out = LonLatProjection.from_array(np.concatenate([p1,p2], axis=axis),
+                                          unit=self.unit)
+        out.meta = self.meta.copy()
+        return out
 
 
 def aspect(filenames, utc1, utc2, outfile=None, spicekernel=None, **kwargs):
