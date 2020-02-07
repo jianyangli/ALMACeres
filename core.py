@@ -195,15 +195,17 @@ class ALMAImage(u.Quantity):
     related to ALMA images.  WCS can also be stored in `.meta['wcs']`
     if available.
     """
-    def __new__(cls, input_array, meta=None, **kwargs):
+    def __new__(cls, input_array, meta=None, header=None, **kwargs):
         obj = u.Quantity(input_array, **kwargs).view(cls)
         obj.meta = meta
+        obj.header = header
         return obj
 
     def __array_finalize__(self, obj):
         super().__array_finalize__(obj)
         if obj is None: return
         self.meta = getattr(obj, 'meta', None)
+        self.header = getattr(obj, 'header', None)
 
     @classmethod
     def from_fits(cls, filename, wcs_kwargs={}, skycoord_kwargs={}):
@@ -229,7 +231,11 @@ class ALMAImage(u.Quantity):
         else:
             raise TypeError('Unrecogniazed input `filename`.')
         hdr = im[0].header
-        data = im[0].data * u.Unit(hdr['BUNIT'])
+        data = (im[0].data * hdr['bscale'] + hdr['bzero']) * \
+                u.Unit(hdr['BUNIT'])
+        hdr.remove('bscale')
+        hdr.remove('bzero')
+        hdr.remove('bunit')
         info = {}
         info['file'] = filename
         info['object'] = hdr['OBJECT'].strip()
@@ -244,7 +250,7 @@ class ALMAImage(u.Quantity):
         info['wcs'] = WCS(hdr, **wcs_kwargs)
         info['xscl'] = abs(hdr['cdelt1']*u.deg)
         info['yscl'] = abs(hdr['cdelt2']*u.deg)
-        return cls(data, meta=info)
+        return cls(data, meta=info, header=hdr)
 
     def calc_geometry(self, metakernel=None):
         """Calculate the observing and illumination geometry
@@ -260,12 +266,18 @@ class ALMAImage(u.Quantity):
         """
         if metakernel is not None:
             spice.furnsh(metakernel)
+            self.meta['metakernel'] = metakernel
+            if self.header is not None:
+                self.header['metakern'] = metakernel
         if 'utc_mid' in self.meta.keys():
             ut = self.meta['utc_mid'].isot
         else:
             ut = self.meta['date_obs'].isot
         target = self.meta['object']
         self.meta['geom'] = utils.subcoord(ut, target)
+        if self.header is not None:
+            for k in self.meta['geom'].keys():
+                self.header[k] = self.meta['geom'][0][k]
         if metakernel is not None:
             spice.unload(metakernel)
 
@@ -364,6 +376,17 @@ class ALMAImage(u.Quantity):
                 setattr(out, k, v)
         return out
 
+    def to_fits(self, filename=None, overwrite=False):
+        """Write image to FITS file"""
+        if filename is None:
+            filename = self.info['file']
+        hdu = fits.PrimaryHDU(np.asarray(self), self.header)
+        hdu.header.insert('object', ('bunit', str(self.unit),
+            'Brightness (pixel) unit'), after=True)
+        hdu.header.insert('bunit', ('bscale', 1.), after=True)
+        hdu.header.insert('bunit', ('bzero', 0.), after=True)
+        hdu.writeto(filename, overwrite=overwrite)
+
 
 class ALMACeresImage(ALMAImage):
     """Subclass of `ALMAImages` for specific functionalities of Ceres images
@@ -402,6 +425,7 @@ class ALMACeresImage(ALMAImage):
             kwargs['threshold'] = threshold
         self.meta['center'] = utils.centroid(self, method=method, box=box,
                                              **kwargs)
+
     def set_obstime(self, utc_start, utc_stop):
         """Set utc_start and utc_stop times.
 
@@ -412,6 +436,10 @@ class ALMACeresImage(ALMAImage):
         self.meta['utc_stop'] = time.Time(utc_stop)
         self.meta['utc_mid'] = self.meta['utc_start'] + \
                 (self.meta['utc_stop'] - self.meta['utc_start']) / 2
+        if self.header is not None:
+            self.header['UTCSTART'] = self.meta['utc_start'].isot
+            self.header['UTCSTOP'] = self.meta['utc_stop'].isot
+            self.header['UTCMID'] = self.meta['utc_mid'].isot
 
     def project(self, return_all=False):
         """Project the image into lon-lat projection
