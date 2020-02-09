@@ -404,6 +404,24 @@ class ALMACeresImage(ALMAImage):
 
     ceres = Ceres()
 
+    @classmethod
+    def from_fits(cls, *args, **kwargs):
+        obj = ALMAImage.from_fits(*args, **kwargs)
+        #print(args)
+        if isinstance(args[0], str):
+            hdr = fits.open(args[0])[0].header
+        elif isinstance(args[0], fits.HDUList):
+            hdr = args[0][0].header
+        if ('CTR_X' in hdr) and ('CTR_Y' in hdr):
+            obj.meta['center'] = hdr['CTR_Y'], hdr['CTR_X']
+        if 'UTCSTART' in hdr:
+            obj.meta['utc_start'] = time.Time(hdr['UTCSTART'])
+        if 'UTCSTOP' in hdr:
+            obj.meta['utc_stop'] = time.Time(hdr['UTCSTOP'])
+        if 'UTCMID' in hdr:
+            obj.meta['utc_mid'] = time.Time(hdr['UTCMID'])
+        return obj.view(ALMACeresImage)
+
     def centroid(self, box=None, method=1, **kwargs):
         """Find the centroid of Ceres
 
@@ -433,8 +451,12 @@ class ALMACeresImage(ALMAImage):
             _, std = utils.resmean(self, std=True)
             threshold = std*5
             kwargs['threshold'] = threshold
-        self.meta['center'] = utils.centroid(self, method=method, box=box,
-                                             **kwargs)
+        self.set_center(utils.centroid(self, method=method, box=box, **kwargs))
+
+    def set_center(self, center):
+        self.meta['center'] = center
+        self.header['CTR_X'] = self.meta['center'][1]
+        self.header['CTR_Y'] = self.meta['center'][0]
 
     def set_obstime(self, utc_start, utc_stop):
         """Set utc_start and utc_stop times.
@@ -474,14 +496,14 @@ class ALMACeresImage(ALMAImage):
                              '`self.centroid` first.')
 
         lat, lon = utils.makenxy(-90,90,91,0,358,180)
-        vpt = vector.Vector(1., self.meta['geom']['SOLon'][0],
-                            self.meta['geom']['SOLat'][0], type='geo',
+        vpt = vector.Vector(1., self.meta['geom']['solon'][0],
+                            self.meta['geom']['solat'][0], type='geo',
                             deg=True)
-        pxlscl = (self.meta['geom']['Range'] * self.meta['xscl']).to('km',
+        pxlscl = (self.meta['geom']['range'] * self.meta['xscl']).to('km',
                  equivalencies=u.dimensionless_angles()).value
         center = self.meta['center']
         x, y = vector.lonlat2xy(lon, lat, self.ceres.shape.r.to('km').value,
-                                vpt, pa=self.meta['geom']['PolePA'],
+                                vpt, pa=self.meta['geom']['polepa'],
                                 center=center, pxlscl=pxlscl)
         w = np.isfinite(x) & np.isfinite(y)
         b = u.Quantity(np.zeros_like(x), unit=self.unit)
@@ -490,14 +512,14 @@ class ALMACeresImage(ALMAImage):
 
         if return_all:
             # calculate local solar time
-            lst = ((lon - self.meta['geom']['SSLon']) / 15 + 12) % 24 * u.hour
+            lst = ((lon - self.meta['geom']['sslon']) / 15 + 12) % 24 * u.hour
             lst = LonLatProjection.from_array(lst)
 
             # calculate emission angle
             latlon_vec = vector.Vector(np.ones_like(lon), lon, lat, type='geo',
                                        deg=True)
-            subsolar_vec = vector.Vector(1, self.meta['geom']['SOLon'][0],
-                                         self.meta['geom']['SOLat'][0],
+            subsolar_vec = vector.Vector(1, self.meta['geom']['solon'][0],
+                                         self.meta['geom']['solat'][0],
                                          type='geo', deg=True)
             emi = latlon_vec.vsep(subsolar_vec) * u.deg
             emi = LonLatProjection.from_array(emi)
