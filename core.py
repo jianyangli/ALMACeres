@@ -250,6 +250,12 @@ class ALMAImage(u.Quantity):
         info['wcs'] = WCS(hdr, **wcs_kwargs)
         info['xscl'] = abs(hdr['cdelt1']*u.deg)
         info['yscl'] = abs(hdr['cdelt2']*u.deg)
+        if ('geometry' in hdr) and hdr['geometry']:
+            keys = ['time', 'rh', 'range', 'phase', 'ra', 'dec', 'solat',
+                    'solon', 'sslat', 'sslon', 'polepa', 'poleinc', 'sunpa',
+                    'suninc']
+            vals = [[hdr[k]] for k in keys]
+            info['geom'] = table.Table(vals, names=keys)
         return cls(data, meta=info, header=hdr)
 
     def calc_geometry(self, metakernel=None):
@@ -274,8 +280,12 @@ class ALMAImage(u.Quantity):
         else:
             ut = self.meta['date_obs'].isot
         target = self.meta['object']
-        self.meta['geom'] = utils.subcoord(ut, target)
+        geom = utils.subcoord(ut, target)
+        for k in geom.keys():
+            geom.rename_column(k, k.lower())
+        self.meta['geom'] = geom
         if self.header is not None:
+            self.header['geometry'] = True
             for k in self.meta['geom'].keys():
                 self.header[k] = self.meta['geom'][0][k]
         if metakernel is not None:
