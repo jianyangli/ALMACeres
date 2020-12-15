@@ -1006,7 +1006,7 @@ class Snell(object):
         first media.
 
         angle: number, astropy Quantity, or array-like number or Quantity,
-            the angle(s) in the second media.  If not Quantity, then in
+            the angle(s) in the first media.  If not Quantity, then in
             degrees by default.
         n1: number, refractive index of the first (incident) media
         n2: number, refractive index of the second (emission) media
@@ -1021,8 +1021,8 @@ class Snell(object):
 
     def angle1(self, angle2):
         """
-        Calculates the refractive angle in the second media from that in the
-        first media.
+        Calculates the refractive angle in the first media from that in the
+        second media.
 
         angle2: number, astropy Quantity, or array-like number or Quantity,
             the angle(s) in the second media.  If not Quantity, then in
@@ -1079,8 +1079,10 @@ class Snell(object):
         ------
         Reflection coefficient
         """
-        if angle1 is not None and angle2 is not None:
+        if (angle1 is not None) and (angle2 is not None):
             raise ValueError('ony one angle should be passed')
+        if (angle1 is None) and (angle2 is None):
+            raise ValueError('one angle has to be passed')
         if angle1 is not None:
             angle2 = self.angle2(angle1)
         if angle2 is not None:
@@ -1089,10 +1091,14 @@ class Snell(object):
             a = self.n1 * np.cos(np.deg2rad(angle1))
             b = self.n2 * np.cos(np.deg2rad(angle2))
             Rs = ((a - b)/(a + b))**2
+            if not np.isfinite(Rs):
+                Rs = 1.0
         if pol in ['p', 'in plane', 'parallel', None]:
             a = self.n1 * np.cos(np.deg2rad(angle2))
             b = self.n2 * np.cos(np.deg2rad(angle1))
             Rp = ((a - b)/(a + b))**2
+            if not np.isfinite(Rp):
+                Rp = 1.0
         try:
             return (Rs + Rp)/2
         except NameError:
@@ -1105,7 +1111,6 @@ class Snell(object):
 class Layer(object):
     """Layer class for calculating propagation of subsurface thermal emission
 
-    Based on the models in Keihm & Langseth (1975), Icarus 24, 211-230
     """
 
     def __init__(self, n, loss_tangent, depth=np.inf, profile=None):
@@ -1121,7 +1126,8 @@ class Layer(object):
             description of `profile`)
         profile : optional, callable object
             `profile(z)` returns the physical quantity of the layer at depth
-            `z`.  Most commonly it is a temperature profile, or a thermal emission profile.
+            `z`.  Most commonly it is a temperature profile, or a thermal
+            emission profile.
         """
         self.n = n
         self.depth = depth
@@ -1138,10 +1144,12 @@ class Layer(object):
 
     def absorption_coefficient(self, wave_freq):
         """
-        Calculates absorption coefficient
+        Calculates absorption coefficient.
+        Follow Hapke (2012) book, Eq. 2.84, 2.85, 2.95b
 
         wave_freq : number, `astropy.units.Quantity` or array_like
-            Wavelength or frequency of observation
+            Wavelength or frequency of observation.  Default unit is
+            'm' if not specified.
         """
         if isinstance(wave_freq, u.Quantity):
             wavelength = wave_freq.to(u.m, equivalencies=u.spectral())
@@ -1178,15 +1186,19 @@ class Surface(object):
     def _check_layer_depth(self):
         for i,l in enumerate(self.layers[:-1]):
             if l.depth == np.inf:
-                raise ValueError(f'only the deepest layer can have infinite depth.  the depth of the {i}th layer cannot be infinity')
+                raise ValueError('only the deepest layer can have infinite '
+                    'depth.  The depth of the {}th layer cannot be '
+                    'infinity'.format(i))
 
 
     def _check_layer_profile(self):
         for i,l in enumerate(self.layers):
             if l.profile is None:
-                raise ValueError(f'the {i}th layer does not have a quantity profile defined')
+                raise ValueError('the {}th layer does not have a quantity '
+                    'profile defined'.format(i))
             if not hasattr(l.profile, '__call__'):
-                raise ValueError(f'the {i}th layer does not have a valid quantity profile defined')
+                raise ValueError('the {}th layer does not have a valid '
+                    'quantity profile defined'.format(i))
 
 
     def emission(self, emi_ang, wavelength, epsrel=1e-4, debug=False):
@@ -1205,9 +1217,9 @@ class Surface(object):
         self._check_layer_depth()
         self._check_layer_profile()
 
-        L = 0
-        n0 = 1.
-        m = 0.
+        L = 0    # total path length of light in the unit of absorption length
+        n0 = 1.  # adjacent media outside of the layer to be calculated
+        m = 0.   # integrated quantity
         if debug:
             D = 0
             prof = {'t': [], 'intprofile': [], 'zzz': [], 'L0': []}
@@ -1222,6 +1234,7 @@ class Surface(object):
                 print(f'cos(i) = {cos_i}, coef = {coef}')
             intfunc = lambda z: l.profile(z) * np.exp(-coef*z/cos_i-L)
             dd = -2.3026*np.log10(epsrel)/coef
+            #dd = l.profile.x.max()
             if l.depth > dd:
                 zz = np.linspace(0, dd, 1000)
             else:
