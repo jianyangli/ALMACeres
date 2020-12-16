@@ -1128,7 +1128,7 @@ class Layer(object):
             If callable, then `profile(z)` returns the physical quantity of
             the layer at depth `z`.  Most commonly it is a temperature
             profile, or a thermal emission profile.
-            If ndarray, then profile[0] is depth and profile[1] is the
+            If array-like, then profile[0] is depth and profile[1] is the
             physical quantity at corresponding depth.
         """
         self.n = n
@@ -1143,7 +1143,7 @@ class Layer(object):
             self.profile = interp1d(profile[0], profile[1], bounds_error=False,
                                     fill_value=(profile[1][0], profile[1][-1]))
         else:
-            raise ValueError('Unrecogniazed input `profile`')
+            raise ValueError('Unrecogniazed type or format for `profile`')
 
     def absorption_length(self, *args, **kwargs):
         """
@@ -1178,11 +1178,17 @@ class Surface(object):
     Based on the models in Keihm & Langseth (1975), Icarus 24, 211-230
     """
 
-    def __init__(self, layers):
+    def __init__(self, layers, profile=None):
         """
         layers: SubsurfaceLayer class object or array_like of it, the
             subsurface layers.  If array-like, then the layers are ordered
             from the top surface downward.
+        profile : optional, array-like of shape (2, N)
+            `profile[0]` is depth and `profile[1]` is the physical quantity at
+            corresponding depth.
+            If this parameter is specified, it will override the `.profile`
+            properties of input layers.  This is the mechanism to provide a
+            continuous temperature profile for multi-layered model.
         """
         if not hasattr(layers, '__iter__'):
             self.layers = [layers]
@@ -1192,7 +1198,27 @@ class Surface(object):
         self._check_layer_depth()
         self.depth = np.sum([l.depth for l in self.layers])
         self.n_layers = len(self.layers)
-
+        self.profile = profile
+        # set `.profile` properties for all layers
+        if profile is not None:
+            if hasattr(profile, '__call__'):
+                for l in self.layers:
+                    l.profile = profile
+            elif np.shape(profile)[0] == 2:
+                from scipy.interpolate import interp1d
+                prof_int = interp1d(profile[0], profile[1], bounds_error=False,
+                                    fill_value=(profile[1][0], profile[1][-1]))
+                if self.n_layers == 1:
+                    self.layers[0].profile = prof_int
+                else:
+                    z0 = 0
+                    for l in self.layers:
+                        l.profile = interp1d(profile[0]-z0, profile[1],
+                                    bounds_error=False,
+                                    fill_value=(profile[1][0], profile[1][-1]))
+                        z0 += l.depth
+            else:
+                raise ValueError('Unrecogniazed type or format for `profile`')
 
     def _check_layer_depth(self):
         for i,l in enumerate(self.layers[:-1]):
@@ -1231,6 +1257,7 @@ class Surface(object):
         L = 0    # total path length of light in the unit of absorption length
         n0 = 1.  # adjacent media outside of the layer to be calculated
         m = 0.   # integrated quantity
+        trans_coef = 1.  # transmission coefficient = 1 - ref_coef
         if debug:
             D = 0
             prof = {'t': [], 'intprofile': [], 'zzz': [], 'L0': []}
@@ -1241,8 +1268,6 @@ class Surface(object):
             ref_coef = snell.reflectance_coefficient(angle2=emi_ang)
             coef = l.absorption_coefficient(wavelength)
             cos_i = np.cos(np.deg2rad(inc))
-            if debug:
-                print(f'cos(i) = {cos_i}, coef = {coef}')
             intfunc = lambda z: l.profile(z) * np.exp(-coef*z/cos_i-L)
             dd = -2.3026*np.log10(epsrel)/coef
             #dd = l.profile.x.max()
@@ -1259,11 +1284,14 @@ class Surface(object):
             from scipy.integrate import quad
             # integral = quad(intfunc, 0, l.depth, epsrel=epsrel)[0]
             integral = (intfunc(zz)[:-1]*(zz[1:]-zz[:-1])).sum()
-            m += (1-ref_coef)*coef*integral/cos_i
+            trans_coef *= (1-ref_coef)
+            m += trans_coef*coef*integral/cos_i
             # prepare for the next layer
             L += l.depth/cos_i*coef
             emi_ang = inc
             n0 = l.n
+            if debug:
+                print(f'cos(i) = {cos_i}, coef = {coef}, ref_coef = {ref_coef}, integral = {integral}')
 
         if debug:
             return m, prof
