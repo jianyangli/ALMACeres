@@ -1124,15 +1124,26 @@ class Layer(object):
         depth : optional, number
             Depth of the layer in the same unit as `z` (see below for the
             description of `profile`)
-        profile : optional, callable object
-            `profile(z)` returns the physical quantity of the layer at depth
-            `z`.  Most commonly it is a temperature profile, or a thermal
-            emission profile.
+        profile : optional, callable object or array-like of shape (2, N)
+            If callable, then `profile(z)` returns the physical quantity of
+            the layer at depth `z`.  Most commonly it is a temperature
+            profile, or a thermal emission profile.
+            If ndarray, then profile[0] is depth and profile[1] is the
+            physical quantity at corresponding depth.
         """
         self.n = n
         self.depth = depth
         self.loss_tangent = loss_tangent
-        self.profile = profile
+        if profile is None:
+            self.profile = None
+        elif hasattr(profile, '__call__'):
+            self.profile = profile
+        elif np.shape(profile)[0] == 2:
+            from scipy.interpolate import interp1d
+            self.profile = interp1d(profile[0], profile[1], bounds_error=False,
+                                    fill_value=(profile[1][0], profile[1][-1]))
+        else:
+            raise ValueError('Unrecogniazed input `profile`')
 
     def absorption_length(self, *args, **kwargs):
         """
