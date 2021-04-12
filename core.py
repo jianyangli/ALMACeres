@@ -2115,3 +2115,107 @@ class AverageBrightnessTemperature(u.SpecificTypeQuantity):
                     utils.writefits(filename, t_eff, overwrite=overwrite)
 
         return cls(t*u.K, wavelength=wavelength, surface=surface)
+
+
+
+from sklearn.decomposition import PCA
+import matplotlib.pyplot as plt
+class PCAModelFitting(PCA):
+    """PCA model fitting class
+    """
+    def __init__(self, model, ti, emis, icedep, loss, lst=None, nonzero=True, **kwargs):
+        """Initialize with a series of models
+
+        model : 2D array of size (a, b, c, d, n)
+            The model used for fitting
+        ti, emis, icedep, loss : 1D arrays of size (a,), (b,), (c,), (d,)
+            Model parameters for thermal inertia, emissivity, icedepth, and
+            loss tangent
+        lst : 1D array
+            Local solar time array.  If provided, then data will be sorted
+            by `lst`, and the dimensions will be labeled by it in plots.  If
+            `None`, then data are not sorted.
+        nonzero : bool, optional
+            If `True`, only use non-zero values in the model for PCA and
+            model fitting
+        **kwargs : keyword parameters for sklearn.decomposition.PCA
+        """
+        # validate input
+        sz = model.shape
+        if (len(sz) != 5) or (sz[0] != len(ti)) or (sz[1] != len(emis)) \
+            or ((sz[0], sz[2]) != icedep.shape) or (sz[3] != len(loss)):
+            raise ValueError('Input parameter error.')
+        # parss parameters
+        self.data = model.copy()
+        self._data1d = self.data.reshape(-1, sz[-1])
+        self.ti = ti
+        self.emissivity = emis
+        self.icedepth = icedep
+        self.losstangent = loss
+        if lst is not None:
+            self.lst = lst.copy()
+        # filter out zero data point if needed
+        if nonzero:
+            self._nzi = np.abs(self._data1d).sum(axis=0) != 0
+        else:
+            self._nzi = np.ones(sz[-1], dtype=bool)
+        ncomp = kwargs.pop('n_components', \
+                                self._data1d[:, self._nzi].shape[1])
+        # initialize PCA
+        super().__init__(n_components=ncomp, **kwargs)
+        self.data_transform = self.fit_transform(self._data1d[:, self._nzi])
+        self.data_transform = self.data_transform.reshape(sz[:-1]+(ncomp,))
+        self.data_transform1d = self.data_transform.reshape(-1, ncomp)
+
+    def plot_eigenvector(self, i=None, ax=None):
+        """Plot eigenvectors
+
+        i : integer or integer iterables
+            Index of eigen vector to be plotted.  If `None`, plot all
+        ax : Axis
+            Axis to plot.  If `None`, create a new axis
+        """
+        if not hasattr(i, '__iter__'):
+            i = [i]
+        if ax is None:
+            ax = plt.figure().add_subplot(111)
+        if self.lst is None:
+            xx = range(self.n_components)
+            xlabel = 'Dimension'
+        else:
+            xx = self.lst[self._nzi]
+            xlabel = 'Local Solar Time'
+        st = xx.argsort()
+        for x in i:
+            ax.plot(xx[st], self.components_[x][st],'-o')
+        ax.set_xlabel(xlabel)
+        plt.legend(['Eigen V{}'.format(x+1) for x in i])
+
+    def plot_eigenvalues(self, ax=None, **kwargs):
+        """Plot eigenvalues
+
+        ax : Axis
+            Axis to plot.  If `None`, create a new axis
+        **kwargs : Keyword parameters accepted by pyplot.plot
+        """
+        if ax is None:
+            ax = plt.figure().add_subplot(111)
+        ax.plot(self.explained_variance_, **kwargs)
+        ax.set_xlabel('Index')
+
+    @property
+    def mean(self):
+        return self.data_transform1d.mean(axis=0)
+
+    @property
+    def median(self):
+        return np.median(self.data_transform1d, axis=0)
+
+    @property
+    def max(self):
+        return self.data_transform1d.max(axis=0)
+
+    @property
+    def min(self):
+        return self.data_transform1d.min(axis=0)
+
