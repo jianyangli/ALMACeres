@@ -2180,12 +2180,12 @@ class PCAModelFitting(PCA):
             i = [i]
         if ax is None:
             ax = plt.figure().add_subplot(111)
-        if self.lst is None:
-            xx = range(self.n_components)
-            xlabel = 'Dimension'
-        else:
+        if hasattr(self, 'lst'):
             xx = self.lst[self._nzi]
             xlabel = 'Local Solar Time'
+        else:
+            xx = np.array(range(self.n_components))
+            xlabel = 'Dimension'
         st = xx.argsort()
         for x in i:
             ax.plot(xx[st], self.components_[x][st],'-o')
@@ -2201,7 +2201,7 @@ class PCAModelFitting(PCA):
         """
         if ax is None:
             ax = plt.figure().add_subplot(111)
-        ax.plot(self.explained_variance_, **kwargs)
+        ax.plot(self.explained_variance_, '-o', **kwargs)
         ax.set_xlabel('Eigenvalue Index')
 
     @property
@@ -2228,6 +2228,8 @@ def in_hull(points, x):
         Point clouds for m points in n-dimensional space
     x : numpy.ndarray of shape (n,)
         Point in n-dimensional space
+
+    Algorithm from https://stackoverflow.com/a/43564754
     """
     from scipy.optimize import linprog
     n_points = len(points)
