@@ -2123,14 +2123,16 @@ import matplotlib.pyplot as plt
 class PCAModelFitting(PCA):
     """PCA model fitting class
     """
-    def __init__(self, model, ti, emis, icedep, loss, lst=None, nonzero=True, **kwargs):
+    def __init__(self, model, ti, emis, icedep, loss,
+                                lst=None, nonzero=True, **kwargs):
         """Initialize with a series of models
 
         model : 2D array of size (a, b, c, d, n)
-            The model used for fitting
+            The model used for fitting.  a, b, c, d are the lengths of model
+            parameters, n is the number of measurements.
         ti, emis, icedep, loss : 1D arrays of size (a,), (b,), (c,), (d,)
             Model parameters for thermal inertia, emissivity, icedepth, and
-            loss tangent
+            loss tangent.
         lst : 1D array
             Local solar time array.  If provided, then data will be sorted
             by `lst`, and the dimensions will be labeled by it in plots.  If
@@ -2201,7 +2203,7 @@ class PCAModelFitting(PCA):
         if ax is None:
             ax = plt.figure().add_subplot(111)
         ax.plot(self.explained_variance_, **kwargs)
-        ax.set_xlabel('Index')
+        ax.set_xlabel('Eigenvalue Index')
 
     @property
     def mean(self):
