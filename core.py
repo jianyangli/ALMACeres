@@ -2117,7 +2117,6 @@ class AverageBrightnessTemperature(u.SpecificTypeQuantity):
         return cls(t*u.K, wavelength=wavelength, surface=surface)
 
 
-
 from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 class PCAModelFitting(PCA):
@@ -2221,3 +2220,20 @@ class PCAModelFitting(PCA):
     def min(self):
         return self.data_transform1d.min(axis=0)
 
+
+def in_hull(points, x):
+    """Check if point `x` is in the convex hull of point cloud `points`
+
+    points : numpy.ndarray of shape (m, n)
+        Point clouds for m points in n-dimensional space
+    x : numpy.ndarray of shape (n,)
+        Point in n-dimensional space
+    """
+    from scipy.optimize import linprog
+    n_points = len(points)
+    n_dim = len(x)
+    c = np.zeros(n_points)
+    A = np.r_[points.T,np.ones((1,n_points))]
+    b = np.r_[x, np.ones(1)]
+    lp = linprog(c, A_eq=A, b_eq=b)
+    return lp.success
