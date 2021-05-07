@@ -2381,3 +2381,110 @@ def in_hull(points, x):
     b = np.r_[x, np.ones(1)]
     lp = linprog(c, A_eq=A, b_eq=b)
     return lp.success
+
+
+class PCAData():
+    """PCA analysis for projected data
+    """
+    def __init__(self, data, lst, **kwargs):
+        """Initialize with a series of models
+
+        data : 3D array of size (n, i, j)
+            Data projected into lon-lat projection.  n is number of
+            observations (images), i is number of latitudes, and j is
+            number of longitudes.
+        lst : 3d array of size (n, i, j)
+            Local solar time array.  Same shape as `data`.
+        **kwargs : keyword parameters for sklearn.decomposition.PCA
+        """
+        self.data = data.copy()
+        self.lst = lst.copy()
+        self.pca = None
+
+    def clustering(self, axis, lat, lst=np.linspace(9,17,20)):
+        """Clustering analysis
+
+        axis : [0, 'obs', 2, 'lon']
+            The axis for clustering analysis.
+            [0, 'obs'] means analysis along the observations direction.
+            [2, 'lon'] means analysis along the longitudinal direction.
+        lat : int
+            Index along latitude direction
+
+        Returns PCA class object.
+        """
+        from scipy.interpolate import interp1d
+        sz = self.data.shape
+        _data = self.data[:, lat, :]
+        _lst = self.lst[:, lat, :]
+        if axis in [0, 'obs']:
+            pass
+        elif axis in [2, 'lon']:
+            if _data.ndim == 3:
+                sz = _data.shape
+                _data = _data.reshape(-1, sz[-1])
+                _lst = _lst.reshape(-1, sz[-1])
+            sz = _data.shape
+            prof = []
+            for i in range(sz[0]):
+                ww = _data[i] > 0
+                l = _lst[i, ww]
+                t = _data[i, ww]
+                s = l.argsort()
+                l = l[s]
+                t = t[s]
+                prof.append(interp1d(l, t))
+            f = np.array([p(lst) for p in prof])
+            self.c_lst = lst  # common lst
+            self.pca = PCA(n_components = len(lst))
+            self.data_transform = self.pca.fit_transform(f)
+
+    def plot_eigenvector(self, i=None, ax=None):
+        """Plot eigenvectors
+
+        i : integer or integer iterables
+            Index of eigen vector to be plotted.  If `None`, plot all
+        ax : Axis
+            Axis to plot.  If `None`, create a new axis
+        """
+        if self.pca is None:
+            raise ValueError('clustering analysis not performed yet, run '
+                    '`.clustering(axis, lat)` first')
+        if not hasattr(i, '__iter__'):
+            i = [i]
+        if ax is None:
+            ax = plt.figure().add_subplot(111)
+        for x in i:
+            ax.plot(self.c_lst, self.pca.components_[x],'-o')
+        ax.set_xlabel('Local Solar Time')
+        plt.legend(['Eigen V{}'.format(x+1) for x in i])
+
+    def plot_eigenvalues(self, ax=None, **kwargs):
+        """Plot eigenvalues
+
+        ax : Axis
+            Axis to plot.  If `None`, create a new axis
+        **kwargs : Keyword parameters accepted by pyplot.plot
+        """
+        if self.pca is None:
+            raise ValueError('clustering analysis not performed yet, run '
+                    '`.clustering(axis, lat)` first')
+        if ax is None:
+            ax = plt.figure().add_subplot(111)
+        ax.plot(self.pca.explained_variance_, '-o', **kwargs)
+        ax.set_xlabel('Eigenvalue Index')
+
+    def mean(self):
+        return self.data_transform1d.mean(axis=0)
+
+    @property
+    def median(self):
+        return np.median(self.data_transform1d, axis=0)
+
+    @property
+    def max(self):
+        return self.data_transform1d.max(axis=0)
+
+    @property
+    def min(self):
+        return self.data_transform1d.min(axis=0)
