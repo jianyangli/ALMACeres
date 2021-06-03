@@ -17,6 +17,7 @@ from . import utils
 from . import saoimage
 from . import vector
 import spiceypy as spice
+from jylipy.image import ImageSet
 
 
 # define thermal inertia units
@@ -2488,3 +2489,51 @@ class PCAData():
     @property
     def min(self):
         return self.data_transform1d.min(axis=0)
+
+
+class Centroid(ImageSet):
+    """Find the centroid of Ceres by edge detection"""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._xc = np.zeros(self._shape)
+        self._yc = np.zeros(self._shape)
+        self._smaj = np.zeros(self._shape)
+        self._smin = np.zeros(self._shape)
+        self._theta = np.zeros(self._shape)
+        self._status = np.zeros(self._shape, dtype=bool)
+        self.attr.extend(['_xc', '_yc', '_smaj', '_smin', '_theta', '_status'])
+        self._generate_flat_views()
+
+    def centroid(self, index=None):
+        from cv2 import Canny
+        from skimage.measure import EllipseModel
+        index_ = self._ravel_indices(index)
+        for i in index_:
+            print(i)
+            if self.image is None or self._1d['image'][i] is None:
+                self._load_image(i)
+            d.imdisp(self._1d['image'][i])
+            im = self._1d['image'][i]
+            im = np.uint8((im - im.min()) / (im.max() - im.min()) * 255)
+            edge_found = False
+            for aptsz in [3, 5, 7]:
+                edge = Canny(im, 20, 100, apertureSize=3)
+                if (edge > 10).any():
+                    edge_found = True
+                    break
+            if not edge_found:
+                continue
+            on_edge = edge > 10
+            yy, xx = np.indices(im.shape)
+            pts = np.c_[xx[on_edge], yy[on_edge]]
+            ell = EllipseModel()
+            ell.estimate(pts)
+            self._1d['_xc'][i], self._1d['_yc'][i], a, b, theta = ell.params
+            if a < b:
+                a, b = b, a
+                theta = theta - np.pi/2
+            self._1d['_smaj'][i] = a
+            self._1d['_smin'][i] = b
+            self._1d['_theta'][i] = np.rad2deg(theta)
+            self._1d['_status'][i] = True
