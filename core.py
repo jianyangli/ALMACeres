@@ -2494,8 +2494,13 @@ class PCAData():
 class Centroid(ImageSet):
     """Find the centroid of Ceres by edge detection"""
 
+    @staticmethod
+    def _ceres_image_loader(file):
+        return np.squeeze(ALMACeresImage.from_fits(file))
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.loader = Centroid._ceres_image_loader
         self._xc = np.zeros(self._shape)
         self._yc = np.zeros(self._shape)
         self._smaj = np.zeros(self._shape)
@@ -2505,17 +2510,17 @@ class Centroid(ImageSet):
         self.attr.extend(['_xc', '_yc', '_smaj', '_smin', '_theta', '_status'])
         self._generate_flat_views()
 
-    def centroid(self, index=None):
+    def _scale2byte(self, im):
+        return np.uint8((im - im.min()) / (im.max() - im.min()) * 255)
+
+    def centroid_canny(self, index=None):
         from cv2 import Canny
         from skimage.measure import EllipseModel
         index_ = self._ravel_indices(index)
         for i in index_:
-            print(i)
             if self.image is None or self._1d['image'][i] is None:
                 self._load_image(i)
-            d.imdisp(self._1d['image'][i])
-            im = self._1d['image'][i]
-            im = np.uint8((im - im.min()) / (im.max() - im.min()) * 255)
+            im = self._scale2byte(self._1d['image'][i].copy())
             edge_found = False
             for aptsz in [3, 5, 7]:
                 edge = Canny(im, 20, 100, apertureSize=3)
@@ -2529,6 +2534,39 @@ class Centroid(ImageSet):
             pts = np.c_[xx[on_edge], yy[on_edge]]
             ell = EllipseModel()
             ell.estimate(pts)
+            self._1d['_xc'][i], self._1d['_yc'][i], a, b, theta = ell.params
+            if a < b:
+                a, b = b, a
+                theta = theta - np.pi/2
+            self._1d['_smaj'][i] = a
+            self._1d['_smin'][i] = b
+            self._1d['_theta'][i] = np.rad2deg(theta)
+            self._1d['_status'][i] = True
+
+    def centroid_manual(self, index=None, threshold_mode='abs', threshold=100):
+        from cv2 import GaussianBlur, Sobel, cartToPolar, CV_64F
+        from skimage.measure import EllipseModel
+        index_ = self._ravel_indices(index)
+        for i in index_:
+            if self.image is None or self._1d['image'][i] is None:
+                self._load_image(i)
+            im = self._scale2byte(self._1d['image'][i].copy())
+            im_blur = GaussianBlur(im, (5, 5), 5)
+            gx = Sobel(np.float32(im_blur), CV_64F, 1, 0, 3)
+            gy = Sobel(np.float32(im_blur), CV_64F, 0, 1, 3)
+            mag, ang = cartToPolar(gx, gy, angleInDegrees=True)
+            if threshold_mode != 'abs':
+                th = mag.max() * threshold
+            else:
+                th = threshold
+            #print(mag.max(), th)
+            on_edge = mag > th
+            yy, xx = np.indices(im.shape)
+            pts = np.c_[xx[on_edge], yy[on_edge]]
+            ell = EllipseModel()
+            ell.estimate(pts)
+            #print(pts.shape)
+            #print(ell.params)
             self._1d['_xc'][i], self._1d['_yc'][i], a, b, theta = ell.params
             if a < b:
                 a, b = b, a
