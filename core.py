@@ -18,6 +18,8 @@ from . import saoimage
 from . import vector
 import spiceypy as spice
 from jylipy.image import ImageSet
+from jylipy import shift
+from xarray import DataArray
 
 
 # define thermal inertia units
@@ -2491,8 +2493,8 @@ class PCAData():
         return self.data_transform1d.min(axis=0)
 
 
-class Centroid(ImageSet):
-    """Find the centroid of Ceres by edge detection"""
+class ALMACeresCentroid(ImageSet):
+    """Base class for ALMA Ceres image centroiding"""
 
     @staticmethod
     def _ceres_image_loader(file):
@@ -2500,14 +2502,27 @@ class Centroid(ImageSet):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.loader = Centroid._ceres_image_loader
+        self.loader = ALMACeresCentroid._ceres_image_loader
         self._xc = np.zeros(self._shape)
         self._yc = np.zeros(self._shape)
+        self.attr.extend(['_xc', '_yc'])
+        self._generate_flat_views()
+
+    @property
+    def center(self):
+        return np.c_[self._yc, self._xc]
+
+
+class EdgeDetectionCentroid(ALMACeresCentroid):
+    """Find the centroid of Ceres by edge detection"""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self._smaj = np.zeros(self._shape)
         self._smin = np.zeros(self._shape)
         self._theta = np.zeros(self._shape)
         self._status = np.zeros(self._shape, dtype=bool)
-        self.attr.extend(['_xc', '_yc', '_smaj', '_smin', '_theta', '_status'])
+        self.attr.extend(['_smaj', '_smin', '_theta', '_status'])
         self._generate_flat_views()
 
     def _scale2byte(self, im):
@@ -2575,3 +2590,217 @@ class Centroid(ImageSet):
             self._1d['_smin'][i] = b
             self._1d['_theta'][i] = np.rad2deg(theta)
             self._1d['_status'][i] = True
+
+
+Centroid = EdgeDetectionCentroid  # for compatibility with old code
+
+
+class CCCenterSearch():
+    """Centroid the data with cross-correlation
+
+    In the centroiding process, the model is shifted in a grid, and the
+    cross-correlations between the model at each grid position and the
+    corresponding patch in the data is calculated.  When the position of
+    the model with the maximum cross-correlation is found, the model center
+    in the pixel coordinate of the data is taken as the center of the data.
+    """
+
+    def __init__(self, data, model, center=None):
+        """
+        data, model : 2D arrays
+            The data and corresponding model array.  If different shape,
+            then the size of data must be no less than the size of model.
+            The center of the model is assumed to be at pixel coordinate
+            (model.shape - 1)/2, where the center of the lower-left pixel
+            has a coordinate of (0, 0).
+        center : (yc, xc), optional
+            The center of data.  Default is at (data.shape -1 / 2).
+        """
+        self.data = data
+        self.model = model
+        if center is None:
+            self.center = (np.array(data.shape) - 1) / 2
+        else:
+            self.center = center
+        self.model_par = {}
+        self.model_par['center'] = (np.array(self.model.shape) - 1) / 2
+        self.model_par['integer_center'] = \
+                            np.int64(np.round(self.model_par['center']))
+        self.model_par['fractional_center'] = \
+                self.model_par['center'] - self.model_par['integer_center']
+        self.subim_par = {}
+
+    def _cut_subimage(self, center):
+        self.subim_par['center'] = center
+        self.subim_par['integer_center'] = np.int64(np.round(center))
+        self.subim_par['fractional_center'] = \
+                            center - self.subim_par['integer_center']
+        xx1 = self.subim_par['integer_center'] - \
+                                        self.model_par['integer_center']
+        xx2 = self.subim_par['integer_center'] + \
+                (np.array(self.model.shape) - self.model_par['integer_center'])
+        return self.data[xx1[0]:xx2[0], xx1[1]:xx2[1]]
+
+    def _fractional_pixel_shift_model(self):
+        fractioanl_shift = self.subim_par['fractional_center'] - \
+                                self.model_par['fractional_center']
+        return shift(self.model, fractioanl_shift)
+
+    def search(self, stepsize=None, precision=0.01, maxiter=50,
+            verbose=True):
+        """Find the center of data
+
+        Parameters
+        ----------
+        stepsize : None, number, or array of 2 numbers, optional
+            Initial step size.  If `None`, then the default step size is 1/10
+            of model size.  If a single number, then it's the step size in both
+            directions.
+        precision : number, optional
+            Center search precision.  Iteration will stop if the precision
+            is reached.
+        maxiter : int, optional
+            Maximum number of iteration.
+        verbose : bool
+        """
+        from scipy.stats import pearsonr
+        if stepsize is None:
+            stepsize = np.array(self.model.shape) / 10
+        if not hasattr(stepsize, '__iter__') or len(stepsize) == 1:
+            stepsize = np.repeat(stepsize, 2)
+
+        if verbose:
+            print('Initial center: {:.4f}, {:.4f}'.format(self.center[0],
+                        self.center[1]))
+            print('Initial stepsize: {:.4f}, {:.4f}'.format(stepsize[0],
+                        stepsize[1]))
+            print('Precision: {:.4f}'.format(precision))
+            print('Start iteration:')
+
+        niter = 0
+        change = np.max(self.model.shape)
+        precision /= 2
+        while ((np.max(change) > precision) \
+                    or (np.max(stepsize) > precision)) \
+                and (niter < maxiter):
+            if verbose:
+                print('  iteration {}'.format(niter+1))
+            # calculate trial centers
+            offset = np.outer(np.linspace(-5, 5, 11), stepsize)
+            trial_centers = self.center + offset
+            # calculate cross-correlation
+            cc = np.zeros((11, 11))
+            for i, yc in enumerate(trial_centers[:, 0]):
+                for j, xc in enumerate(trial_centers[:, 1]):
+                    subim = self._cut_subimage([yc, xc])
+                    model_s = self._fractional_pixel_shift_model()
+                    cc[i, j] = pearsonr(subim.flatten(), model_s.flatten())[0]
+            y, x = np.unravel_index(cc.argmax(), cc.shape)
+            center = trial_centers[[y, x], [0,1]]
+            change = center - self.center
+            self.center = center
+            if verbose:
+                print('    new center: {:.4f}, {:.4f}'.format(center[0],
+                            center[1]))
+                print('    changed by: {:.4f}, {:.4f}'.format(change[0],
+                            change[1]))
+                print('    stepsize: {:.4f}, {:.4f}'.format(stepsize[0],
+                            stepsize[1]))
+            if (y not in [0, 10]) and (change[0] < precision) \
+                        and (stepsize[0] >= precision):
+                stepsize[0] /= 2
+            if (x not in [0, 10]) and (change[1] < precision) \
+                        and (stepsize[1] >= precision):
+                stepsize[1] /= 2
+            niter += 1
+
+        # calculate best match model and data
+        self._matched_data = self._cut_subimage(self.center)
+        self._matched_model = self._fractional_pixel_shift_model()
+        self._cc = cc
+        if verbose:
+            print('Final center: {:.4f}, {:.4f}'.format(center[0], center[1]))
+
+    def __call__(self, *args, **kwargs):
+        self.search(*args, **kwargs)
+
+
+class CCCentroid(ALMACeresCentroid):
+    """Search for centers of images with cross-correlation"""
+
+    def __init__(self, im, model, center=None, **kwargs):
+        """
+        Parameters
+        ----------
+        im : str array or ndarray
+            Input image name or array.  See `jylipy.image.ImageSet`.
+        model : ndarray
+            Model used to match the image to search for center.  Same shape
+            as `im`.
+        center : array of shape (..., 2)
+            Initial centers.
+        **kwargs : other keywords accepted by `jylipy.image.ImageSet`.
+        """
+        super().__init__(im, **kwargs)
+        self.model = np.zeros(self._shape, dtype='object')
+        self._yc[:] = center[:, 0]
+        self._xc[:] = center[:, 1]
+        self._data = np.zeros(self._shape, dtype='object')
+        self.attr.extend(['model', '_data'])
+        self._generate_flat_views()
+        model1d = model.reshape(-1, model.shape[-2], model.shape[-1])
+        center1d = self.center.reshape(-1, 2)
+        for i in range(self._size):
+            if self.image is None or self._1d['image'][i] is None:
+                self._load_image(i)
+            ct = center1d[i]
+            ct = None if (ct**2).sum() == 0 else ct
+            self._1d['model'][i] = model1d[i]
+            self._1d['_data'][i] = CCCenterSearch(self._1d['image'][i], \
+                    self._1d['model'][i], center=ct)
+
+    def centroid(self, extremely_verbose=False, **kwargs):
+        verbose = kwargs.pop('verbose', True)
+        if extremely_verbose:
+            verbose = True
+        for i in range(self._size):
+            if verbose:
+                print('image {}: '.format(i), end='')
+            self._1d['_data'][i](verbose=extremely_verbose, **kwargs)
+            self._1d['_yc'][i], self._1d['_xc'][i] = self._1d['_data'][i].center
+            if verbose:
+                print('{:.4f}, {:.4f}'.format(self._1d['_yc'][i],
+                                              self._1d['_xc'][i]))
+
+    def write(self, *args, **kwargs):
+        self.attr.remove('model')
+        self.attr.remove('_data')
+        super().write(*args, **kwargs)
+        self.attr.extend(['model', '_data'])
+
+
+def cut_subimage(im, center, shape=(256, 256)):
+    """Cut subimage
+
+    im : `ALMACeresImage`
+        Input image to cut
+    center : (yc, xc)
+        The center pixel coordinate of image
+    shape : (ysize, xsize)
+        The shape of subimage, must be even numbers
+
+    Return
+    ------
+    Output subimage will be centered at (shape-1)/2, i.e., default
+    at (127.5, 127.5), where the center of the lower-left pixel is
+    (0, 0).
+    """
+    yc, xc = center
+    sz = np.array(im.shape)
+    ref = np.int64(np.round(sz/2))  # reference point
+    if np.any(np.array(shape)//2 * 2 != np.array(shape)):
+        raise ValueError('shape must be even numbers')
+    outsz = np.array(shape)//2
+    im_s = shift(im, (ref[0] + 0.5 - yc, ref[1] + 0.5 - xc))
+    return im_s[ref[0]-outsz[0]+1:ref[0]+outsz[0]+1,
+                ref[1]-outsz[1]+1:ref[1]+outsz[1]+1]
