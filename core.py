@@ -20,6 +20,7 @@ import spiceypy as spice
 from jylipy.image import ImageSet
 from jylipy import shift
 from xarray import DataArray
+from astropy.modeling.models import BlackBody
 
 
 # define thermal inertia units
@@ -2190,7 +2191,7 @@ class AverageBrightnessTemperature(u.SpecificTypeQuantity):
     @classmethod
     @u.quantity_input(wavelength=u.m, equivalencies=u.spectral())
     def from_model(cls, files, surface, wavelength, savemap=None,
-            overwrite=True, benchmark=False,):
+            overwrite=True, benchmark=False, influx=True):
         """Calculate disk-averaged temperature from simulated images
 
         Parameters
@@ -2224,12 +2225,15 @@ class AverageBrightnessTemperature(u.SpecificTypeQuantity):
         for i,f in enumerate(files):
             print(i, path.basename(f))
             im = fits.open(f)
-            if len(im[0].data.shape) == 2:
-                inside = im[0].data > 0
-                t[i] = im[0].data[inside].mean()
-            elif len(im[0].data.shape) == 3:
-                t_eff = np.zeros_like(im[0].data[0])
-                inside = im[0].data[0] > 0
+            data = im[0].data
+            if influx:
+                data = BlackBody(data * u.K)(wavelength).to('Jy/arcsec2').value
+            if len(data.shape) == 2:
+                inside = data > 0
+                t[i] = data[inside].mean()
+            elif len(data.shape) == 3:
+                t_eff = np.zeros_like(data[0])
+                inside = data[0] > 0
                 if len(np.where(inside)[0]) > 71400:
                     warnings.warn('computational time could be > 30 s')
                 if benchmark:
@@ -2245,12 +2249,16 @@ class AverageBrightnessTemperature(u.SpecificTypeQuantity):
                             t0 = t1
                     from scipy.interpolate import interp1d
                     surface.layers[0].profile = interp1d(im[1].data,
-                        im[0].data[:,i1,i2], kind='cubic', bounds_error=False,
-                        fill_value=(None, im[0].data[-1,i1,i2]))
+                        data[:,i1,i2], kind='cubic', bounds_error=False,
+                        fill_value=(None, data[-1,i1,i2]))
                     t_eff[i1, i2] = surface.emission(im[2].data[i1, i2],
                         wavelength.value)
                     if benchmark:
                         j+=1
+                if influx:
+                    t_eff = (t_eff * u.Jy / u.arcsec**2).to('K',
+                        equivalencies=u.brightness_temperature(
+                            wavelength)).value
                 t[i] = t_eff[inside].mean()
 
                 if savemap is not None:
