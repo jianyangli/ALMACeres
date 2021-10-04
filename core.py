@@ -2751,8 +2751,12 @@ class CCCentroid(ALMACeresCentroid):
         """
         super().__init__(im, **kwargs)
         self.model = np.zeros(self._shape, dtype='object')
-        self._yc[:] = center[:, 0]
-        self._xc[:] = center[:, 1]
+        if center is None:
+            self._yc = np.zeros(self._shape)
+            self._xc = np.zeros(self._shape)
+        else:
+            self._yc[:] = center[:, 0]
+            self._xc[:] = center[:, 1]
         self._data = np.zeros(self._shape, dtype='object')
         self.attr.extend(['model', '_data'])
         self._generate_flat_views()
