@@ -224,7 +224,8 @@ class BeamConvolve:
         sz = data.shape
         data = data.reshape(-1, sz[-3], sz[-2], sz[-1])
         out = np.zeros_like(data)
-        img = np.zeros((np.prod(sz[:-3]), sz[-3]) + tuple(self._imsz))
+        img = np.zeros((np.prod(sz[:-3]), sz[-3]) + tuple(self._imsz),
+                dtype='float32')
         t0 = time.time()
         avg = 0
         for i, d in enumerate(data):
@@ -240,7 +241,7 @@ class BeamConvolve:
                 dproj = self.deprojection(im, self.metadata[j])
                 conv = self.convolve_beam(dproj, self.metadata[j],
                     frequency=frequency, flux_input=flux_input, beam=beam)
-                img[i, j] = conv
+                img[i, j] = conv.astype('float32')
                 out[i, j] = self.projection(conv, self.metadata[j])
         out = out.reshape(sz)
         img = img.reshape(sz[:-2] + tuple(self._imsz))
