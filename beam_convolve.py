@@ -40,6 +40,22 @@ def planck_flux(T, freq):
 
 
 class BeamConvolve:
+    """Convolve temperature model with a Gaussian beam.
+
+    Input model is assumed to be projected in lat-lon projection.  See
+    `.__call__()` for the details about the format of model.
+
+    The input model will be deprojected to sky plane based on the corresponding
+    meta data to generate simulated images.  Then the image will be convolved
+    with a Gaussian beam.  Finally the convolved image is projected back to
+    lat-lon.  The final convolved model will be returned.
+
+    The final convolved model and the intermediate products (non-convolved
+    simulated image and convolved image) are all saved in class attributes:
+        `.convolved_model` : convolved and projected model
+        `.convolved_image` : convolved image in sky plane
+        `.nonconvolved_image` : simulated image in sky plane before convolution
+    """
 
     def __init__(self, metadata, imsz=(512, 512), plot_extra_figures=False):
         self.metadata = metadata
@@ -235,8 +251,9 @@ class BeamConvolve:
         sz = data.shape
         data = data.reshape(-1, sz[-3], sz[-2], sz[-1])
         out = np.zeros_like(data)
-        img = np.zeros((np.prod(sz[:-3]), sz[-3]) + tuple(self._imsz),
+        prj = np.zeros((np.prod(sz[:-3]), sz[-3]) + tuple(self._imsz),
                 dtype='float32')
+        img = np.zeros_like(prj)
         t0 = time.time()
         avg = 0
         for i, d in enumerate(data):
@@ -250,6 +267,7 @@ class BeamConvolve:
                 t0 = time.time()
             for j, im in enumerate(d):
                 dproj = self.deprojection(im, self.metadata[j])
+                prj[i, j] = dproj.astype('float32')
                 conv = self.convolve_beam(dproj, self.metadata[j],
                     frequency=frequency, flux_input=flux_input, beam=beam)
                 img[i, j] = conv.astype('float32')
@@ -258,6 +276,7 @@ class BeamConvolve:
         img = img.reshape(sz[:-2] + tuple(self._imsz))
         self.convolved_model = out
         self.convolved_image = img
+        self.nonconvolved_image = prj
         return out
 
 
