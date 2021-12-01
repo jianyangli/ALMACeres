@@ -297,7 +297,8 @@ class BeamConvolve:
                 img[i, j] = conv.astype('float32')
                 out[i, j] = self.projection(conv, self.metadata[j],
                         degree=degree).astype('float32')
-        self.convolved_model = out.reshape(sz)
+        out = out.reshape(sz)
+        self.convolved_model = out
         self.convolved_image = img.reshape(sz[:-2] + tuple(self._imsz))
         self.nonconvolved_image = prj.reshape(sz[:-2] + tuple(self._imsz))
         return out
