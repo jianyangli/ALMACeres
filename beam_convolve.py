@@ -11,7 +11,7 @@ from astropy.modeling.physical_models import BlackBody
 import matplotlib.pyplot as plt
 from jylipy import makenxy
 from .core import ALMACeresImageMetaData, Beam
-from . import vector
+from jylipy import vector
 
 # from scipy.stats import ttest_ind, ttest_ind_from_stats, chisquare
 #import os
@@ -97,14 +97,18 @@ class BeamConvolve:
         vpt = vector.Vector(1., meta.solon, meta.solat,
                 type='geo', deg=True)
 
-        lon, lat = vector.xy2lonlat(rc, vpt, pxlscl, imsz=self._imsz)
+        proj = vector.EllipsoidProjection(rc, vpt, pxlscl, imsz=self._imsz)
+        yarr, xarr = np.mgrid[0:self._imsz[0], 0:self._imsz[1]]
+        yarr = yarr.astype(float)
+        xarr = xarr.astype(float)
+        lon, lat = proj.xy2lonlat(xarr, yarr)
         w = np.isfinite(lon) & np.isfinite(lat)
         im_deprojected_model = np.zeros_like(lon)
 
         imsz = im_projected_model.shape
-        x_lon = lon[w] / (2 * np.pi) * imsz[1]
+        x_lon = lon[w] / 360 * imsz[1]
         x_lon[x_lon > 179.4] = 0
-        y_lat = (lat[w] + np.pi / 2) / np.pi * imsz[0]
+        y_lat = (lat[w] + 90) / 180 * imsz[0]
         y_lat[y_lat > 90.0] = 0
         im_deprojected_model[w] = \
             im_projected_model[np.round(y_lat).astype(int),
@@ -138,8 +142,8 @@ class BeamConvolve:
         pxlscl = (meta.range * u.au * abs(meta.xscl *
                 u.marcsec)).to('km', u.dimensionless_angles()).value
         rc = np.array([482.64, 480.64, 445.57])
-        x, y = vector.lonlat2xy(lon, lat, rc, vpt, pa=meta.polepa,
-                                center=np.array(self._imsz)//2, pxlscl=pxlscl)
+        proj = vector.EllipsoidProjection(rc, vpt, pxlscl, imsz=self._imsz)
+        x, y = proj.lonlat2xy(lon, lat)
 
         w = np.isfinite(x) & np.isfinite(y)
         imsize = smoothed_data_gaussian.shape
