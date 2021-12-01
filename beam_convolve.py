@@ -271,12 +271,11 @@ class BeamConvolve:
                 conv = self.convolve_beam(dproj, self.metadata[j],
                     frequency=frequency, flux_input=flux_input, beam=beam)
                 img[i, j] = conv.astype('float32')
-                out[i, j] = self.projection(conv, self.metadata[j])
-        out = out.reshape(sz)
-        img = img.reshape(sz[:-2] + tuple(self._imsz))
-        self.convolved_model = out
-        self.convolved_image = img
-        self.nonconvolved_image = prj
+                out[i, j] = self.projection(conv, self.metadata[j]).astype(
+                        'float32')
+        self.convolved_model = out.reshape(sz)
+        self.convolved_image = img.reshape(sz[:-2] + tuple(self._imsz))
+        self.nonconvolved_image = prj.reshape(sz[:-2] + tuple(self._imsz))
         return out
 
 
