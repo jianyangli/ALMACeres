@@ -3,13 +3,14 @@
 Adopted from Kaj William's package
 """
 
+import warnings
 import time
 import numpy as np
+from scipy.interpolate import RectBivariateSpline
 from astropy.convolution import Gaussian2DKernel, convolve_fft
 import astropy.units as u
 from astropy.modeling.physical_models import BlackBody
 import matplotlib.pyplot as plt
-from jylipy import makenxy
 from .core import ALMACeresImageMetaData, Beam
 from jylipy import vector
 
@@ -62,7 +63,7 @@ class BeamConvolve:
         self._imsz = imsz
         self._plot_extra_figures = plot_extra_figures
 
-    def deprojection(self, im_projected_model, meta):
+    def deprojection(self, im_projected_model, meta, degree=1):
         """De-project lon-lat projection to sky plane
 
         Parameters
@@ -71,6 +72,9 @@ class BeamConvolve:
             The lon-lat projection array
         meta : ALMACeresImageMetaData
             Meta data corresponding to the input image
+        degree : int, optional
+            The degree of bivariate spline.  0 means nearest neighbor
+            interpolation, not spline.
 
         Return
         ------
@@ -93,26 +97,30 @@ class BeamConvolve:
             abs(meta.xscl * u.marcsec)).to('km',
                     u.dimensionless_angles()).value
         rc = np.array([482.64, 480.64, 445.57])
-
         vpt = vector.Vector(1., meta.solon, meta.solat,
                 type='geo', deg=True)
-
         proj = vector.EllipsoidProjection(rc, vpt, pxlscl, imsz=self._imsz)
-        yarr, xarr = np.mgrid[0:self._imsz[0], 0:self._imsz[1]]
-        yarr = yarr.astype(float)
-        xarr = xarr.astype(float)
+        yarr, xarr = np.mgrid[:self._imsz[0]-1:self._imsz[0]*1j,
+                              :self._imsz[1]-1:self._imsz[1]*1j]
         lon, lat = proj.xy2lonlat(xarr, yarr)
-        w = np.isfinite(lon) & np.isfinite(lat)
-        im_deprojected_model = np.zeros_like(lon)
 
+        w = np.isfinite(lon) & np.isfinite(lat)
         imsz = im_projected_model.shape
         x_lon = lon[w] / 360 * imsz[1]
         x_lon[x_lon > 179.4] = 0
         y_lat = (lat[w] + 90) / 180 * imsz[0]
         y_lat[y_lat > 90.0] = 0
-        im_deprojected_model[w] = \
-            im_projected_model[np.round(y_lat).astype(int),
-                               np.round(x_lon).astype(int)]
+        im_deprojected_model = np.zeros_like(lon)
+
+        if degree == 0:
+            im_deprojected_model[w] = \
+                im_projected_model[np.round(y_lat).astype(int),
+                                   np.round(x_lon).astype(int)]
+        else:
+            sz = im_projected_model.shape
+            f = RectBivariateSpline(range(sz[0]), range(sz[1]),
+                    im_projected_model, kx=degree, ky=degree)
+            im_deprojected_model[w] = f(y_lat, x_lon, grid=False)
 
         if self._plot_extra_figures:
             plt.imshow(im_deprojected_model, cmap='gray')
@@ -122,7 +130,7 @@ class BeamConvolve:
 
         return im_deprojected_model
 
-    def projection(self, smoothed_data_gaussian, meta):
+    def projection(self, smoothed_data_gaussian, meta, degree=1):
         """Project image to lon-lat projection
 
         Parameters
@@ -131,28 +139,37 @@ class BeamConvolve:
             Image to be projected
         meta : ALMACeresImageMetaData
             Meta data corresponding to the input image
+        degree : int, optional
+            The degree of bivariate spline.  0 means nearest neighbor
+            interpolation, not spline.
 
         Return
         ------
         2D array : Projected image in lon-lat
         """
-        lat, lon = makenxy(-90, 90, 91, 0, 358, 180)
         vpt = vector.Vector(1., meta.solon, meta.solat,
                 type='geo', deg=True)
         pxlscl = (meta.range * u.au * abs(meta.xscl *
                 u.marcsec)).to('km', u.dimensionless_angles()).value
         rc = np.array([482.64, 480.64, 445.57])
         proj = vector.EllipsoidProjection(rc, vpt, pxlscl, imsz=self._imsz)
+        lat, lon = np.mgrid[-90:90:91j, 0:358:180j]
         x, y = proj.lonlat2xy(lon, lat)
 
         w = np.isfinite(x) & np.isfinite(y)
-        imsize = smoothed_data_gaussian.shape
         x_coord = x[w]
         y_coord = y[w]
         im_convolved_model_projected = np.zeros_like(x)
-        im_convolved_model_projected[w] = smoothed_data_gaussian \
-                    [np.round(y_coord).astype(int),
-                     np.round(x_coord).astype(int)]
+
+        if degree == 0:
+            im_convolved_model_projected[w] = smoothed_data_gaussian \
+                        [np.round(y_coord).astype(int),
+                         np.round(x_coord).astype(int)]
+        else:
+            sz = smoothed_data_gaussian.shape
+            f = RectBivariateSpline(range(sz[0]), range(sz[1]),
+                    smoothed_data_gaussian, kx=degree, ky=degree)
+            im_convolved_model_projected[w] = f(y_coord, x_coord, grid=False)
 
         if self._plot_extra_figures:
             plt.figure()
@@ -233,7 +250,7 @@ class BeamConvolve:
         return smoothed_data_gaussian
 
     def __call__(self, data, frequency=265*u.GHz, flux_input=True, beam=None,
-            benchmark=False):
+            benchmark=False, degree=1):
         """Apply beam convolution to input data.
 
         Parameters
@@ -249,6 +266,9 @@ class BeamConvolve:
             `.convolve_beam()`
         beam : Beam object
             Specify the beam to be used for convolution.  See `.convolve_beam()`
+        degree : int, optional
+            The degree of bivariate spline.  0 means nearest neighbor
+            interpolation, not spline.
         benchmark : bool
             Print out time information.
         """
@@ -270,13 +290,13 @@ class BeamConvolve:
                     end='\r')
                 t0 = time.time()
             for j, im in enumerate(d):
-                dproj = self.deprojection(im, self.metadata[j])
+                dproj = self.deprojection(im, self.metadata[j], degree=degree)
                 prj[i, j] = dproj.astype('float32')
                 conv = self.convolve_beam(dproj, self.metadata[j],
                     frequency=frequency, flux_input=flux_input, beam=beam)
                 img[i, j] = conv.astype('float32')
-                out[i, j] = self.projection(conv, self.metadata[j]).astype(
-                        'float32')
+                out[i, j] = self.projection(conv, self.metadata[j],
+                        degree=degree).astype('float32')
         self.convolved_model = out.reshape(sz)
         self.convolved_image = img.reshape(sz[:-2] + tuple(self._imsz))
         self.nonconvolved_image = prj.reshape(sz[:-2] + tuple(self._imsz))
