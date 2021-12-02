@@ -3,16 +3,25 @@
 
 from warnings import warn
 from os import path
+from time import time
 import numpy as np
-from scipy.interpolate import RectBivariateSpline
-from astropy import table, time
+import matplotlib.pyplot as plt
+from scipy.interpolate import interp1d, RectBivariateSpline
+from scipy.optimize import linprog
+from scipy.stats import pearsonr
+from sklearn.decomposition import PCA
+from skimage.measure import EllipseModel
+from cv2 import GaussianBlur, Sobel, cartToPolar, CV_64F, Canny
+from astropy.table import Table
+from astropy.time import Time
 from astropy.io import fits
-import astropy.units as u
-import astropy.constants as const
 from astropy.coordinates import SkyCoord
 from astropy.wcs import WCS
 from astropy.modeling.models import BlackBody
+import astropy.units as u
+import astropy.constants as const
 import spiceypy as spice
+from photutils import CircularAperture
 from jylipy import saoimage, vector, shift
 from jylipy.image import ImageSet
 from . import utils
@@ -166,7 +175,7 @@ class ALMACeresImageMetaData(utils.MetaData):
         if hasattr(self, 'utc_start') and hasattr(self, 'utc_stop'):
             utc1 = getattr(self, 'utc_start')
             utc2 = getattr(self, 'utc_stop')
-            self.utc_mid = (time.Time(utc1)+(time.Time(utc2)-time.Time(utc1))/2.).isot
+            self.utc_mid = (Time(utc1)+(Time(utc2)-Time(utc1))/2.).isot
             sub = self.calc_geometry(spicekernel=spicekernel)
             sub.remove_column('Time')
             for k in sub.colnames:
@@ -241,7 +250,7 @@ class ALMAImage(u.Quantity):
         info['beam'] = Beam(fwhm=[hdr['BMAJ'], hdr['BMIN']]*u.deg,
                             pa=hdr['BPA']*u.deg)
         info['frequency'] = hdr['RESTFRQ']*u.Hz
-        info['date_obs'] = time.Time(hdr['DATE-OBS'])
+        info['date_obs'] = Time(hdr['DATE-OBS'])
         info['skycoord'] = SkyCoord(ra=hdr['OBSRA']*u.deg,
                                     dec=hdr['OBSDEC']*u.deg,
                                     frame=hdr['RADESYS'].lower(),
@@ -254,7 +263,7 @@ class ALMAImage(u.Quantity):
                     'solon', 'sslat', 'sslon', 'polepa', 'poleinc', 'sunpa',
                     'suninc']
             vals = [[hdr[k]] for k in keys]
-            info['geom'] = table.Table(vals, names=keys)
+            info['geom'] = Table(vals, names=keys)
         return cls(data, meta=info, header=hdr)
 
     def calc_geometry(self, metakernel=None):
@@ -361,8 +370,7 @@ class ALMAImage(u.Quantity):
             keys.remove('geom')
         else:
             geom = None
-        from .utils import MetaData
-        out = MetaData()
+        out = utils.MetaData()
         for k in keys:
             setattr(out, k, meta[k])
         if coord is not None:
@@ -414,11 +422,11 @@ class ALMACeresImage(ALMAImage):
         if ('CTR_X' in hdr) and ('CTR_Y' in hdr):
             obj.meta['center'] = hdr['CTR_Y'], hdr['CTR_X']
         if 'UTCSTART' in hdr:
-            obj.meta['utc_start'] = time.Time(hdr['UTCSTART'])
+            obj.meta['utc_start'] = Time(hdr['UTCSTART'])
         if 'UTCSTOP' in hdr:
-            obj.meta['utc_stop'] = time.Time(hdr['UTCSTOP'])
+            obj.meta['utc_stop'] = Time(hdr['UTCSTOP'])
         if 'UTCMID' in hdr:
-            obj.meta['utc_mid'] = time.Time(hdr['UTCMID'])
+            obj.meta['utc_mid'] = Time(hdr['UTCMID'])
         return obj.view(ALMACeresImage)
 
     def centroid(self, box=None, method=1, **kwargs):
@@ -463,8 +471,8 @@ class ALMACeresImage(ALMAImage):
         The start and stop UTC of each images are usually provided separately
         based on the processing of each image.
         """
-        self.meta['utc_start'] = time.Time(utc_start)
-        self.meta['utc_stop'] = time.Time(utc_stop)
+        self.meta['utc_start'] = Time(utc_start)
+        self.meta['utc_stop'] = Time(utc_stop)
         self.meta['utc_mid'] = self.meta['utc_start'] + \
                 (self.meta['utc_stop'] - self.meta['utc_start']) / 2
         if self.header is not None:
@@ -609,12 +617,11 @@ class LonLatProjection(u.Quantity):
         hdu.header['latmin'] = self.meta['latlim'][0]
         hdu.header['latmax'] = self.meta['latlim'][1]
         if filename is not None:
-            from os.path import isfile
             if append:
                 overwrite = True
                 if extname is not None:
                     hdu.header['EXTNAME'] = extname
-                if isfile(filename):
+                if path.isfile(filename):
                     hdulist = fits.open(filename)
                 else:
                     hdulist = fits.HDUList()
@@ -859,7 +866,7 @@ def get_center(filenames, box=200, outfile=None, method=1):
         cts.append(utils.centroid(im, method=method, box=box))
     cts = np.array(cts)
     if outfile is not None:
-        table.Table([fname, cts[:,1], cts[:,0]],names='File xc yc'.split()).write(outfile,overwrite=True)
+        Table([fname, cts[:,1], cts[:,0]],names='File xc yc'.split()).write(outfile,overwrite=True)
     return cts
 
 
@@ -896,7 +903,7 @@ def background(filenames, edge=100, box=200, outfile=None):
             print('{0}: {1}'.format(fnames[-1], np.array(bgs[-1])))
     bgs = np.array(bgs).T
     if outfile is not None:
-        table.Table([fnames, bgs[0], bgs[1], bgs[2], bgs[3], bgs[4]], names='File Background bg1 bg2 bg3 bg4'.split()).write(outfile, overwrite=True)
+        Table([fnames, bgs[0], bgs[1], bgs[2], bgs[3], bgs[4]], names='File Background bg1 bg2 bg3 bg4'.split()).write(outfile, overwrite=True)
     return bgs[0]
 
 
@@ -1011,7 +1018,6 @@ def photometry(filenames, centers, rapt=100, outfile=None):
 
     Return: array, the total flux in Jy
     '''
-    import photutils as phot
     nfs = len(filenames)
     if not utils.is_iterable(rapt):
         rapt = np.repeat(rapt,nfs)
@@ -1026,7 +1032,7 @@ def photometry(filenames, centers, rapt=100, outfile=None):
         sz = im.shape
         bm = Beam([hdr['BMAJ']*u.deg,hdr['BMIN']*u.deg]).area.to('arcsec2').value
         bms.append(bm)
-        apt = phot.CircularAperture(c,r)
+        apt = CircularAperture(c,r)
         ftot = utils.apphot(im, apt)['aperture_sum'][0]
         ftot *= (hdr['cdelt1']*3600)**2/bm
         flux.append(ftot)
@@ -1034,7 +1040,7 @@ def photometry(filenames, centers, rapt=100, outfile=None):
     flux = np.array(flux)
     bms = np.array(bms)
 
-    fltbl = table.Table([fname,bms,flux],names='File BeamArea Flux'.split())
+    fltbl = Table([fname,bms,flux],names='File BeamArea Flux'.split())
     if outfile is not None:
         fltbl.write(outfile,overwrite=True)
 
@@ -1285,7 +1291,7 @@ class Layer(object):
         elif hasattr(profile, '__call__'):
             self.profile = profile
         elif np.shape(profile)[0] == 2:
-            from scipy.interpolate import interp1d
+
             self.profile = interp1d(profile[0], profile[1], bounds_error=False,
                                     fill_value=(profile[1][0], profile[1][-1]))
         else:
@@ -1351,7 +1357,6 @@ class Surface(object):
                 for l in self.layers:
                     l.profile = profile
             elif np.shape(profile)[0] == 2:
-                from scipy.interpolate import interp1d
                 prof_int = interp1d(profile[0], profile[1], bounds_error=False,
                                     fill_value=(profile[1][0], profile[1][-1]))
                 if self.n_layers == 1:
@@ -1427,7 +1432,7 @@ class Surface(object):
                 prof['zzz'].append(zz+D)
                 prof['L0'].append(L)
                 D += l.depth
-            from scipy.integrate import quad
+            # from scipy.integrate import quad
             # integral = quad(intfunc, 0, l.depth, epsrel=epsrel)[0]
             integral = (intfunc(zz)[:-1]*(zz[1:]-zz[:-1])).sum()
             trans_coef *= (1-ref_coef)
@@ -1865,8 +1870,7 @@ class Thermal():
                 uu = uu0
 
         if benchmark:
-            import time
-            t0 = time.time()
+            t0 = time()
 
         niter = 0
         rms = 1.
@@ -1899,7 +1903,7 @@ class Thermal():
                 print(f'Iter #{niter:6d}: RMS = {rms:.3g}, Max. surf. T = {uu.max():.3f} @ LST {(tt[ww]/(2*np.pi)*24) % 24:.2f} hrs, Term. T = {uu[:,nz-1].min():.3f}')
 
         if benchmark:
-            print(f'Time for {niter:6d} iterations: {time.time()-t0:.3f} sec')
+            print(f'Time for {niter:6d} iterations: {time()-t0:.3f} sec')
 
         self.model_param['niter'] = niter
         self.temperature_model = uu
@@ -2239,15 +2243,13 @@ class AverageBrightnessTemperature(u.SpecificTypeQuantity):
                 if benchmark:
                     print(len(np.where(inside)[0]))
                     j=0
-                    import time
-                    t0 = time.time()
+                    t0 = time()
                 for i1, i2 in np.array(np.where(inside)).T:
                     if benchmark:
                         if j % 1000 == 0:
-                            t1 = time.time()
+                            t1 = time()
                             print(j, t1-t0)
                             t0 = t1
-                    from scipy.interpolate import interp1d
                     surface.layers[0].profile = interp1d(im[1].data,
                         data[:,i1,i2], kind='cubic', bounds_error=False,
                         fill_value=(None, data[-1,i1,i2]))
@@ -2270,8 +2272,6 @@ class AverageBrightnessTemperature(u.SpecificTypeQuantity):
         return cls(t*u.K, wavelength=wavelength, surface=surface)
 
 
-from sklearn.decomposition import PCA
-import matplotlib.pyplot as plt
 class PCAModelFitting(PCA):
     """PCA model fitting class
     """
@@ -2384,7 +2384,7 @@ def in_hull(points, x):
 
     Algorithm from https://stackoverflow.com/a/43564754
     """
-    from scipy.optimize import linprog
+
     n_points = len(points)
     n_dim = len(x)
     c = np.zeros(n_points)
@@ -2424,7 +2424,6 @@ class PCAData():
 
         Returns PCA class object.
         """
-        from scipy.interpolate import interp1d
         sz = self.data.shape
         _data = self.data[:, lat, :]
         _lst = self.lst[:, lat, :]
@@ -2537,8 +2536,6 @@ class EdgeDetectionCentroid(ALMACeresCentroid):
         return np.uint8((im - im.min()) / (im.max() - im.min()) * 255)
 
     def centroid_canny(self, index=None):
-        from cv2 import Canny
-        from skimage.measure import EllipseModel
         index_ = self._ravel_indices(index)
         for i in index_:
             if self.image is None or self._1d['image'][i] is None:
@@ -2567,8 +2564,6 @@ class EdgeDetectionCentroid(ALMACeresCentroid):
             self._1d['_status'][i] = True
 
     def centroid_manual(self, index=None, threshold_mode='abs', threshold=100):
-        from cv2 import GaussianBlur, Sobel, cartToPolar, CV_64F
-        from skimage.measure import EllipseModel
         index_ = self._ravel_indices(index)
         for i in index_:
             if self.image is None or self._1d['image'][i] is None:
@@ -2671,7 +2666,7 @@ class CCCenterSearch():
             Maximum number of iteration.
         verbose : bool
         """
-        from scipy.stats import pearsonr
+
         if stepsize is None:
             stepsize = np.array(self.model.shape) / 10
         if not hasattr(stepsize, '__iter__') or len(stepsize) == 1:
