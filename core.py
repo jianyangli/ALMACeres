@@ -1,26 +1,21 @@
 """Main ALMA Ceres data processing module
 """
 
-import warnings
-import json
+from warnings import warn
 from os import path
 import numpy as np
+from scipy.interpolate import RectBivariateSpline
 from astropy import table, time
 from astropy.io import fits
 import astropy.units as u
 import astropy.constants as const
-from astropy.io import fits
 from astropy.coordinates import SkyCoord
 from astropy.wcs import WCS
-import spiceypy as spice
-from . import utils
-from . import saoimage
-from . import vector
-import spiceypy as spice
-from jylipy.image import ImageSet
-from jylipy import shift
-from xarray import DataArray
 from astropy.modeling.models import BlackBody
+import spiceypy as spice
+from jylipy import saoimage, vector, shift
+from jylipy.image import ImageSet
+from . import utils
 
 
 # define thermal inertia units
@@ -113,7 +108,6 @@ class Ceres(Body):
     def __init__(self):
         # body shape and pole based on DLR RC3 shape model
         self.shape = TriaxialShape(482.64*u.km, 480.64*u.km, 445.57*u.km)
-        from astropy.coordinates import SkyCoord
         self.pole = SkyCoord(ra=291.41*u.deg, dec=66.79*u.deg)
         self.GM = 62.68 * u.Unit('km3/s2')
 
@@ -1803,7 +1797,7 @@ class Thermal():
         'niter' : number of iterations to converge
         """
         if self.Theta is None:
-            warnings.warn('aborted: thermal parameter is unknown')
+            warn('aborted: thermal parameter is unknown')
             return
 
         self.model_param = {}
@@ -1815,11 +1809,11 @@ class Thermal():
         self.model_param['t'] = tt
 
         if self.skin_depth is None:
-            warnings.warn("skip depth cannot be calculated, depth parameter `.model_param['z']` will be dimensionless")
+            warn("skip depth cannot be calculated, depth parameter `.model_param['z']` will be dimensionless")
         else:
             self.model_param['z'] = self.model_param['z'] * self.skin_depth
         if self.Omega is None:
-            warnings.warn("rotational period unknown, time parameter `.model_param['t']` will be dimensionless")
+            warn("rotational period unknown, time parameter `.model_param['t']` will be dimensionless")
         else:
             self.model_param['t'] = self.model_param['t'] / self.Omega
 
@@ -1831,9 +1825,9 @@ class Thermal():
                 else:
                     insol = np.cos(np.deg2rad(inc))
                 if (insol < 0).any():
-                    warnings.warn('some solar incidence angle < 90 deg')
+                    warn('some solar incidence angle < 90 deg')
             else:
-                warnings.warn('wrong parameter `inc` ignored!')
+                warn('wrong parameter `inc` ignored!')
                 insol = np.clip(np.cos(tt), 0, None)
                 insol = _shift_1d_array(insol, nt/2)
         else:
@@ -1841,13 +1835,13 @@ class Thermal():
             insol = _shift_1d_array(insol, nt//2)
         self.model_param['insolation'] = insol
         if self.rh is None:
-            warnings.warn("heliocentric distance is unknown, solar insolation parameter `.model_param['insolation']` will be dimensionless")
+            warn("heliocentric distance is unknown, solar insolation parameter `.model_param['insolation']` will be dimensionless")
         else:
             self.model_param['insolation'] = self.model_param['insolation'] * solar_constant / self.rh.to('au').value**2
 
         r = dt / (dz*dz)
         if r >= 0.5:
-            warnings.warn('time step is too large, and solution may not converge')
+            warn('time step is too large, and solution may not converge')
 
         if verbose:
             print('Solve 1-D heat conduction equation:')
@@ -1865,7 +1859,7 @@ class Thermal():
         else:
             uu0 = np.asarray(init)
             if uu0.shape != (nt, nz):
-                warnings.warn('Warning: Invalid initial condition is ignored!')
+                warn('Warning: Invalid initial condition is ignored!')
                 uu = np.ones((nt, nz)) * 0.6 * insol.max()
             else:
                 uu = uu0
@@ -1910,7 +1904,7 @@ class Thermal():
         self.model_param['niter'] = niter
         self.temperature_model = uu
         if self.Tss is None:
-            warnings.warn("subsolar temperature is unknown, temperature model `.temperature_model` will be dimensionless")
+            warn("subsolar temperature is unknown, temperature model `.temperature_model` will be dimensionless")
         else:
             self.temperature_model = self.temperature_model * self.Tss
         self.model_param['lst'] = self.model_param['t']/self.Period*24*u.hour
@@ -1994,7 +1988,7 @@ class SphereTPM():
         if init is not None:
             tt0 = np.asarray(init)
             if tt0.shape != (nt, nz, nlat):
-                warnings.warn('invalid initial condition is ignored')
+                warn('invalid initial condition is ignored')
                 tt0 = np.ones((nt, nz, nlat)) * 0.4
         else:
             tt0 = np.ones((nt, nz, nlat)) * 0.4
@@ -2050,7 +2044,7 @@ class SphereTPM():
     def save(self, file, overwrite=False):
         """Save model temperature to file"""
         if getattr(self, 'temperature_model', None) is None:
-            warnings.warn('model not generated yet, no data to save')
+            warn('model not generated yet, no data to save')
             return
         hdu = fits.PrimaryHDU(self.temperature_model.to('K').value)
         if self.tpm.skin_depth is not None:
@@ -2241,7 +2235,7 @@ class AverageBrightnessTemperature(u.SpecificTypeQuantity):
                 t_eff = np.zeros_like(data[0])
                 inside = data[0] > 0
                 if len(np.where(inside)[0]) > 71400:
-                    warnings.warn('computational time could be > 30 s')
+                    warn('computational time could be > 30 s')
                 if benchmark:
                     print(len(np.where(inside)[0]))
                     j=0
