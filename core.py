@@ -500,19 +500,25 @@ class ALMACeresImage(ALMAImage):
             raise ValueError('Centroid not found.  Please run '
                              '`self.centroid` first.')
 
-        lat, lon = utils.makenxy(-90,90,91,0,358,180)
+        lat, lon = np.mgrid[-90:90:91j, 0:358:180j]
         vpt = vector.Vector(1., self.meta['geom']['solon'][0],
                             self.meta['geom']['solat'][0], type='geo',
                             deg=True)
         pxlscl = (self.meta['geom']['range'] * self.meta['xscl']).to('km',
                  equivalencies=u.dimensionless_angles()).value
         center = self.meta['center']
-        x, y = vector.lonlat2xy(lon, lat, self.ceres.shape.r.to('km').value,
-                                vpt, pa=self.meta['geom']['polepa'][0],
-                                center=center, pxlscl=pxlscl)
+        proj = vector.EllipsoidProjection(self.ceres.shape.r.to('km').value,
+                vpt, pxlscl, pa=self.meta['geom']['polepa'][0],
+                center=center)
+        x, y = proj.lonlat2xy(lon, lat)
         w = np.isfinite(x) & np.isfinite(y)
         b = u.Quantity(np.zeros_like(x), unit=self.unit)
-        b[w] = self[np.round(y[w]).astype(int), np.round(x[w]).astype(int)]
+        # use bivariate spline interpolation
+        sz = self.shape
+        f = RectBivariateSpline(range(sz[0]), range(sz[1]), self, kx=1, ky=1)
+        b[w] = u.Quantity(f(y[w], x[w], grid=False), unit=self.unit)
+        # use nearest neightbor interpolation
+        #b[w] = self[np.round(y[w]).astype(int), np.round(x[w]).astype(int)]
         b = LonLatProjection.from_array(b)
 
         if return_all:
