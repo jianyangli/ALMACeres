@@ -4,8 +4,8 @@
 from warnings import warn
 from os import path
 from time import time
-import numpy as np
-import matplotlib.pyplot as plt
+import numpy as np, matplotlib.pyplot as plt
+from scipy import ndimage
 from scipy.interpolate import interp1d, RectBivariateSpline
 from scipy.optimize import linprog
 from scipy.stats import pearsonr
@@ -18,11 +18,9 @@ from astropy.io import fits
 from astropy.coordinates import SkyCoord
 from astropy.wcs import WCS
 from astropy.modeling.models import BlackBody
-import astropy.units as u
-import astropy.constants as const
-import spiceypy as spice
+import astropy.units as u, astropy.constants as const, spiceypy as spice
 from photutils import CircularAperture
-from jylipy import saoimage, vector, shift
+from jylipy import saoimage, vector
 from jylipy.image import ImageSet
 from . import utils
 
@@ -728,6 +726,51 @@ class ProcessingALMACeresImages():
             im.to_fits(outfile)
         else:
             return im
+
+    def crop(self, outfile, size=[256, 256], precise_center=False,
+            overwrite=False):
+        """Trim images
+
+        Crop each image to the specified shape.  Image will be centered
+        based on the `im.meta['center']` if available, or to the center
+        of the original image.  All cropped images are stacked to a 3D
+        array, and saved in the output file.
+
+        Parameter
+        ---------
+        outfile : str
+            Name of output file.
+        size : [int, int], optional
+            The shape of cropped image
+        precise_center : bool, optional
+            If `True`, images will be shifted by factional pixels to
+            be precisely centered at `im.meta['center']`.  Otherwise,
+            image will be centered to the closest whole pixel to the
+            specified center.
+        overwrite : bool, optional
+            Overwrite existing output file
+        """
+        files = [path.join(self.preprocess_dir, path.basename(x)) \
+                    for x in self.meta.files]
+        nfiles = len(files)
+        ct_crop = (np.array(size) - 1) / 2  # center of cropped image
+        ct_crop_int = ct_crop.astype(int)
+        ct_crop_frac = ct_crop - ct_crop.astype(int)  # fraction center
+        out = np.zeros((nfiles, ) + tuple(size))
+        for i, f in enumerate(files):
+            im = np.squeeze(ALMACeresImage.from_fits(f))
+            ct_int = np.array(im.meta['center']).astype(int)
+            if precise_center:  # shift fractional pixel first
+                offset = im.meta['center'] - ct_int - ct_crop_frac
+                im = ndimage.shift(im.value, -offset, mode='wrap')
+            else:
+                im = im.value
+            y1 = ct_int[0] - ct_crop_int[0]
+            y2 = ct_int[0] + (size[0] - ct_crop_int[0])
+            x1 = ct_int[1] - ct_crop_int[1]
+            x2 = ct_int[1] + (size[1] - ct_crop_int[1])
+            out[i] = im[y1:y2, x1:x2]
+        fits.writeto(outfile, out, overwrite=overwrite)
 
     def __call__(self, centers=None, overwrite=False):
         """Data processing pipeline
@@ -2647,7 +2690,7 @@ class CCCenterSearch():
     def _fractional_pixel_shift_model(self):
         fractioanl_shift = self.subim_par['fractional_center'] - \
                                 self.model_par['fractional_center']
-        return shift(self.model, fractioanl_shift)
+        return ndimage.shift(self.model, fractioanl_shift)
 
     def search(self, stepsize=None, precision=0.01, maxiter=50,
             verbose=True):
@@ -2808,6 +2851,6 @@ def cut_subimage(im, center, shape=(256, 256)):
     if np.any(np.array(shape)//2 * 2 != np.array(shape)):
         raise ValueError('shape must be even numbers')
     outsz = np.array(shape)//2
-    im_s = shift(im, (ref[0] + 0.5 - yc, ref[1] + 0.5 - xc))
+    im_s = ndimage.shift(im, (ref[0] + 0.5 - yc, ref[1] + 0.5 - xc))
     return im_s[ref[0]-outsz[0]+1:ref[0]+outsz[0]+1,
                 ref[1]-outsz[1]+1:ref[1]+outsz[1]+1]
