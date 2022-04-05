@@ -237,11 +237,18 @@ class ALMAImage(u.Quantity):
         else:
             raise TypeError('Unrecogniazed input `filename`.')
         hdr = im[0].header
-        data = (im[0].data * hdr['bscale'] + hdr['bzero']) * \
-                u.Unit(hdr['BUNIT'])
-        hdr.remove('bscale')
-        hdr.remove('bzero')
-        hdr.remove('bunit')
+        data = im[0].data
+        if 'bscale' in hdr:
+            data *= hdr['bscale']
+            hdr.remove('bscale')
+        if 'bzero' in hdr:
+            data += hdr['bzero']
+            hdr.remove('bzero')
+        if 'bunit' in hdr:
+            data = u.Quantity(data, unit=hdr['bunit'])
+            hdr.remove('bunit')
+        else:
+            data = u.Quantity(data)
         info = {}
         info['file'] = filename
         info['object'] = hdr['OBJECT'].strip()
